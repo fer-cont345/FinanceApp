@@ -335,11 +335,13 @@
     };
 
     const frequencyOptions = [
-      { months: 1, label: "Mensual" },
-      { months: 2, label: "Bimestral" },
-      { months: 3, label: "Trimestral" },
-      { months: 6, label: "Semestral" },
-      { months: 12, label: "Anual" }
+      { value: "w1", weeks: 1, months: 0, label: "Semanal" },
+      { value: "w2", weeks: 2, months: 0, label: "Cada 2 semanas" },
+      { value: "m1", weeks: 0, months: 1, label: "Mensual" },
+      { value: "m2", weeks: 0, months: 2, label: "Bimestral" },
+      { value: "m3", weeks: 0, months: 3, label: "Trimestral" },
+      { value: "m6", weeks: 0, months: 6, label: "Semestral" },
+      { value: "m12", weeks: 0, months: 12, label: "Anual" }
     ];
 
     const weekDayNames = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
@@ -358,6 +360,7 @@
     let selectedWeekStart = getWeekStart(getTodayDateString());
     let sheetType = null;
     let sheetEditingId = null;
+    let sheetCoverageTotal = 0;
 
     // ---------- Storage ----------
 
@@ -368,7 +371,8 @@
         cards: [],
         expenses: [],
         fixedExpenses: [],
-        envelopes: []
+        envelopes: [],
+        savingsCoverages: {}
       };
     }
 
@@ -399,7 +403,8 @@
         cards: Array.isArray(rawData.cards) ? rawData.cards : [],
         expenses: Array.isArray(rawData.expenses) ? rawData.expenses : [],
         fixedExpenses: Array.isArray(rawData.fixedExpenses) ? rawData.fixedExpenses : [],
-        envelopes: Array.isArray(rawData.envelopes) ? rawData.envelopes : []
+        envelopes: Array.isArray(rawData.envelopes) ? rawData.envelopes : [],
+        savingsCoverages: rawData.savingsCoverages && typeof rawData.savingsCoverages === "object" ? rawData.savingsCoverages : {}
       };
     }
 
@@ -539,12 +544,21 @@
         .replace(/'/g, "&#39;");
     }
 
-    /** Returns the label of a frequency in months. */
-    function getFrequencyLabel(frequencyMonths) {
+    /** Returns the frequency option value ("w1", "m2"...) of a fixed expense. */
+    function getFrequencyValue(fixedExpense) {
+      if (Number(fixedExpense.frequencyWeeks) > 0) {
+        return "w" + Number(fixedExpense.frequencyWeeks);
+      }
+      return "m" + Number(fixedExpense.frequencyMonths);
+    }
+
+    /** Returns the readable frequency of a fixed expense. */
+    function getFrequencyLabel(fixedExpense) {
+      const frequencyValue = getFrequencyValue(fixedExpense);
       const option = frequencyOptions.find(function (item) {
-        return item.months === Number(frequencyMonths);
+        return item.value === frequencyValue;
       });
-      return option ? option.label : "Cada " + frequencyMonths + " meses";
+      return option ? option.label : frequencyValue;
     }
 
     /** Returns a readable payment method, including the card name when there is one. */
@@ -600,8 +614,16 @@
       return openStatementKey;
     }
 
-    /** Checks if a statement of a card is marked as paid. */
+    /** Checks if a statement was due before the app was first used, so it is taken as already paid. */
+    function isStatementPaidBeforeTracking(card, statementKey) {
+      return getStatementDueDate(card, statementKey) < appData.settings.trackingStartDate;
+    }
+
+    /** Checks if a statement of a card is paid: marked by the user or due before the app was first used. */
     function isStatementPaid(card, statementKey) {
+      if (isStatementPaidBeforeTracking(card, statementKey)) {
+        return true;
+      }
       return Array.isArray(card.paidStatementKeys) && card.paidStatementKeys.indexOf(statementKey) !== -1;
     }
 
@@ -636,20 +658,28 @@
 
     // ---------- Fixed expenses ----------
 
+    /** Returns the date of a fixed expense charge number "index" counted from its next charge date. */
+    function getFixedOccurrenceDate(fixedExpense, index) {
+      const frequencyWeeks = Number(fixedExpense.frequencyWeeks) || 0;
+      if (frequencyWeeks > 0) {
+        return addDaysToDateString(fixedExpense.nextChargeDate, index * frequencyWeeks * 7);
+      }
+      return addMonthsToDateString(fixedExpense.nextChargeDate, index * Number(fixedExpense.frequencyMonths));
+    }
+
     /** Returns the charge dates of a fixed expense from its next charge date up to two years ahead. */
     function getFixedOccurrences(fixedExpense) {
       const occurrences = [];
       const limitDate = addDaysToDateString(getTodayDateString(), 730);
-      const frequencyMonths = Number(fixedExpense.frequencyMonths);
 
       for (let index = 0; index < 400; index++) {
-        const occurrenceDate = addMonthsToDateString(fixedExpense.nextChargeDate, index * frequencyMonths);
+        const occurrenceDate = getFixedOccurrenceDate(fixedExpense, index);
         if (occurrenceDate > limitDate) {
           break;
         }
         occurrences.push({
           date: occurrenceDate,
-          previousDate: addMonthsToDateString(fixedExpense.nextChargeDate, (index - 1) * frequencyMonths)
+          previousDate: getFixedOccurrenceDate(fixedExpense, index - 1)
         });
       }
 
@@ -720,11 +750,14 @@
             return;
           }
 
+          // A weekly charge is set aside entirely in the week it happens; longer ones are spread since the previous charge.
+          const startDate = Number(fixedExpense.frequencyWeeks) === 1 ? occurrence.date : occurrence.previousDate;
+
           if (fixedExpense.paymentMethod === "card") {
             const card = findRecord(appData.cards, fixedExpense.cardId);
             if (card) {
               const statementKey = getStatementKeyForDate(card, occurrence.date);
-              items.push(createCardItem(card, statementKey, fixedExpense.name, Number(fixedExpense.amount), occurrence.previousDate));
+              items.push(createCardItem(card, statementKey, fixedExpense.name, Number(fixedExpense.amount), startDate));
             }
           } else {
             items.push({
@@ -733,7 +766,7 @@
               groupType: "fixed",
               label: fixedExpense.name,
               amount: Number(fixedExpense.amount),
-              startDate: occurrence.previousDate,
+              startDate: startDate,
               dueDate: occurrence.date,
               isPaid: false
             });
@@ -771,7 +804,13 @@
       return total;
     }
 
-    /** Calculates what must be set aside in a week, grouped by card payment or fixed expense. */
+    /** Returns how much of a payment group is paid with savings, never more than its total. */
+    function getSavingsCoverage(groupKey, totalAmount) {
+      const coveredAmount = Number(appData.savingsCoverages[groupKey]) || 0;
+      return Math.min(coveredAmount, totalAmount);
+    }
+
+    /** Calculates what must be set aside in a week, grouped by card payment or fixed expense. The part paid with savings is not taken from the salary. */
     function getWeekPlan(weekStart) {
       const groups = {};
 
@@ -781,21 +820,30 @@
         }
         if (!groups[item.groupKey]) {
           groups[item.groupKey] = {
+            groupKey: item.groupKey,
             label: item.groupLabel,
             groupType: item.groupType,
             dueDate: item.dueDate,
             totalAmount: 0,
+            fullWeeklyAmount: 0,
+            coveredAmount: 0,
             weeklyAmount: 0
           };
         }
         groups[item.groupKey].totalAmount += item.amount;
-        groups[item.groupKey].weeklyAmount += getWeeklyShare(item, weekStart);
+        groups[item.groupKey].fullWeeklyAmount += getWeeklyShare(item, weekStart);
       });
 
       const rows = Object.keys(groups).map(function (groupKey) {
         return groups[groupKey];
       }).filter(function (group) {
-        return group.weeklyAmount > 0.005;
+        return group.fullWeeklyAmount > 0.005;
+      });
+
+      rows.forEach(function (row) {
+        row.coveredAmount = getSavingsCoverage(row.groupKey, row.totalAmount);
+        const remainingAmount = row.totalAmount - row.coveredAmount;
+        row.weeklyAmount = row.totalAmount > 0 ? row.fullWeeklyAmount * (remainingAmount / row.totalAmount) : 0;
       });
 
       rows.sort(function (first, second) {
@@ -908,17 +956,19 @@
         (plan.freeAmount < 0 && plan.salary > 0 ? '<div class="warning-text">Esta semana te faltan ' + formatMoney(-plan.freeAmount) + '.</div>' : '') +
       '</div>';
 
-      html += '<div class="card"><div class="card-title">Apartar para pagos</div>';
+      html += '<div class="card"><div class="card-title">Apartar para pagos</div>' +
+        '<p class="row-subtitle" style="margin-bottom:4px">Toca un pago para cubrir una parte con tu ahorro.</p>';
       if (plan.rows.length === 0) {
         html += '<div class="empty-state">No hay pagos que apartar esta semana.</div>';
       } else {
         plan.rows.forEach(function (row) {
           const isDueSoon = row.dueDate <= addDaysToDateString(weekEnd, 7);
-          html += '<div class="row">' +
+          html += '<div class="row tappable" data-action="edit-coverage" data-id="' + escapeHtml(row.groupKey) + '">' +
             '<div class="row-main">' +
               '<div class="row-title">' + escapeHtml(row.label) + '</div>' +
               '<div class="row-subtitle">Vence ' + escapeHtml(formatShortDate(row.dueDate)) + ' · total ' + formatMoney(row.totalAmount) +
                 (isDueSoon ? ' <span class="badge pending">Próximo</span>' : '') + '</div>' +
+              (row.coveredAmount > 0 ? '<div class="row-subtitle" style="color:var(--accent)">Con ahorro: ' + formatMoney(row.coveredAmount) + '</div>' : '') +
             '</div>' +
             '<div class="row-amount">' + formatMoney(row.weeklyAmount) + '</div>' +
           '</div>';
@@ -1044,6 +1094,7 @@
       const dueDate = getStatementDueDate(card, statementKey);
       const isPaid = isStatementPaid(card, statementKey);
 
+      const coveredAmount = getSavingsCoverage("card-" + card.id + "-" + statementKey, total);
       let badge = '<span class="badge pending">Pendiente</span>';
       if (isPaid) {
         badge = '<span class="badge paid">Pagado</span>';
@@ -1051,11 +1102,14 @@
         badge = '<span class="badge overdue">Vencido</span>';
       }
 
+      const paidBeforeTracking = isStatementPaidBeforeTracking(card, statementKey);
+
       return '<div class="row">' +
-        '<button class="check-button' + (isPaid ? ' checked' : '') + '" data-action="toggle-statement" data-id="' + card.id + '" data-statement="' + statementKey + '">' + (isPaid ? '✓' : '') + '</button>' +
+        '<button class="check-button' + (isPaid ? ' checked' : '') + '" data-action="toggle-statement" data-id="' + card.id + '" data-statement="' + statementKey + '"' + (paidBeforeTracking ? ' disabled' : '') + '>' + (isPaid ? '✓' : '') + '</button>' +
         '<div class="row-main">' +
           '<div class="row-title">' + title + '</div>' +
           '<div class="row-subtitle">Corte ' + escapeHtml(formatShortDate(statementKey)) + ' · pago ' + escapeHtml(formatShortDate(dueDate)) + ' ' + badge + '</div>' +
+          (coveredAmount > 0 ? '<div class="row-subtitle" style="color:var(--accent)">Con ahorro: ' + formatMoney(coveredAmount) + '</div>' : '') +
         '</div>' +
         '<div class="row-amount">' + formatMoney(total) + '</div>' +
       '</div>';
@@ -1192,7 +1246,7 @@
       html += '<div class="card" style="padding-bottom:4px"><div class="card-title">Todos tus fijos</div>';
 
       if (appData.fixedExpenses.length === 0) {
-        return html + '<div class="empty-state">Toca + para agregar renta, luz, internet, suscripciones…</div></div>';
+        return html + '<div class="empty-state">Toca + para agregar renta, luz, gasolina, suscripciones…</div></div>';
       }
 
       const sortedFixedExpenses = appData.fixedExpenses.slice();
@@ -1210,7 +1264,7 @@
 
         html += '<div class="row tappable" data-action="edit-fixed" data-id="' + fixedExpense.id + '">' +
           '<div class="row-main"><div class="row-title">' + escapeHtml(fixedExpense.name) + '</div>' +
-          '<div class="row-subtitle">' + escapeHtml(getFrequencyLabel(fixedExpense.frequencyMonths)) + ' · ' + escapeHtml(getPaymentMethodText(fixedExpense.paymentMethod, fixedExpense.cardId)) + ' · ' + nextText + '</div></div>' +
+          '<div class="row-subtitle">' + escapeHtml(getFrequencyLabel(fixedExpense)) + ' · ' + escapeHtml(getPaymentMethodText(fixedExpense.paymentMethod, fixedExpense.cardId)) + ' · ' + nextText + '</div></div>' +
           '<div class="row-amount">' + formatMoney(fixedExpense.amount) + '</div>' +
         '</div>';
       });
@@ -1339,17 +1393,17 @@
     /** Builds the form to add or edit a fixed expense. */
     function buildFixedExpenseForm(fixedExpense) {
       const isActive = fixedExpense ? fixedExpense.isActive : true;
-      const selectedFrequency = fixedExpense ? Number(fixedExpense.frequencyMonths) : 1;
+      const selectedFrequency = fixedExpense ? getFrequencyValue(fixedExpense) : "m1";
       let frequencyOptionsHtml = "";
       frequencyOptions.forEach(function (option) {
-        frequencyOptionsHtml += '<option value="' + option.months + '"' + (option.months === selectedFrequency ? " selected" : "") + '>' + option.label + '</option>';
+        frequencyOptionsHtml += '<option value="' + option.value + '"' + (option.value === selectedFrequency ? " selected" : "") + '>' + option.label + '</option>';
       });
 
       return buildSheetHeader(fixedExpense ? "Editar gasto fijo" : "Nuevo gasto fijo") +
-        '<div class="field"><label>Nombre</label><input name="name" type="text" required maxlength="60" placeholder="Renta, luz, Netflix…" value="' + escapeHtml(fixedExpense ? fixedExpense.name : "") + '"></div>' +
+        '<div class="field"><label>Nombre</label><input name="name" type="text" required maxlength="60" placeholder="Renta, luz, gasolina…" value="' + escapeHtml(fixedExpense ? fixedExpense.name : "") + '"></div>' +
         '<div class="field-row">' +
           '<div class="field"><label>Monto (promedio)</label><input name="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required value="' + (fixedExpense ? fixedExpense.amount : "") + '"></div>' +
-          '<div class="field"><label>Frecuencia</label><select name="frequencyMonths">' + frequencyOptionsHtml + '</select></div>' +
+          '<div class="field"><label>Frecuencia</label><select name="frequency">' + frequencyOptionsHtml + '</select></div>' +
         '</div>' +
         '<div class="field"><label>Próxima fecha de cobro</label><input name="nextChargeDate" type="date" required value="' + (fixedExpense ? fixedExpense.nextChargeDate : getTodayDateString()) + '"></div>' +
         '<div class="field-row">' +
@@ -1369,6 +1423,17 @@
         '<div class="field"><label>Cantidad por semana</label><input name="weeklyAmount" type="number" inputmode="decimal" step="0.01" min="0.01" required value="' + (envelope ? envelope.weeklyAmount : "") + '"></div>' +
         '<p class="helper-text">No puede pasar de lo que te queda libre esta semana después de los pagos.</p>' +
         buildSheetButtons();
+    }
+
+    /** Builds the form to pay part of a card payment or fixed expense with savings. */
+    function buildCoverageForm(row) {
+      const coveredAmount = Number(appData.savingsCoverages[row.groupKey]) || 0;
+      return buildSheetHeader("Pagar con ahorro") +
+        '<p class="row-subtitle" style="margin-bottom:14px">' + escapeHtml(row.label) + ' · vence ' + escapeHtml(formatDate(row.dueDate)) + ' · total ' + formatMoney(row.totalAmount) + '</p>' +
+        '<div class="field"><label>Monto que pagas con tu ahorro</label><input name="coveredAmount" type="number" inputmode="decimal" step="0.01" min="0" max="' + row.totalAmount.toFixed(2) + '" required value="' + (coveredAmount > 0 ? coveredAmount : "") + '"></div>' +
+        '<p class="helper-text">Esta parte ya no se aparta de tu sueldo. Lo que falte se reparte en las semanas que quedan.</p>' +
+        '<button type="submit" class="primary-button">Guardar</button>' +
+        (coveredAmount > 0 ? '<button type="button" class="danger-button" data-action="delete-record">Quitar ahorro</button>' : '');
     }
 
     /** Builds the form to edit the weekly salary and payday. */
@@ -1398,6 +1463,15 @@
         form.innerHTML = buildFixedExpenseForm(findRecord(appData.fixedExpenses, recordId));
       } else if (type === "envelope") {
         form.innerHTML = buildEnvelopeForm(findRecord(appData.envelopes, recordId));
+      } else if (type === "coverage") {
+        const row = getWeekPlan(selectedWeekStart).rows.find(function (planRow) {
+          return planRow.groupKey === recordId;
+        });
+        if (!row) {
+          return;
+        }
+        sheetCoverageTotal = row.totalAmount;
+        form.innerHTML = buildCoverageForm(row);
       } else {
         form.innerHTML = buildSettingsForm();
       }
@@ -1545,11 +1619,16 @@
         return false;
       }
 
+      const frequencyOption = frequencyOptions.find(function (option) {
+        return option.value === formData.get("frequency");
+      });
+
       upsertRecord(appData.fixedExpenses, {
         id: recordId,
         name: formData.get("name").trim(),
         amount: Number(formData.get("amount")),
-        frequencyMonths: Number(formData.get("frequencyMonths")),
+        frequencyWeeks: frequencyOption.weeks,
+        frequencyMonths: frequencyOption.months,
         nextChargeDate: formData.get("nextChargeDate"),
         category: formData.get("category"),
         paymentMethod: paymentMethod,
@@ -1585,6 +1664,21 @@
       return true;
     }
 
+    /** Saves the part of a payment covered with savings. Returns false when the amount is above the total. */
+    function saveCoverage(formData) {
+      const coveredAmount = Number(formData.get("coveredAmount")) || 0;
+      if (coveredAmount > sheetCoverageTotal + 0.005) {
+        alert("No puede ser mayor al total: " + formatMoney(sheetCoverageTotal) + ".");
+        return false;
+      }
+      if (coveredAmount <= 0) {
+        delete appData.savingsCoverages[sheetEditingId];
+      } else {
+        appData.savingsCoverages[sheetEditingId] = coveredAmount;
+      }
+      return true;
+    }
+
     /** Saves the salary settings form. */
     function saveSettings(formData) {
       appData.settings.weeklySalary = Number(formData.get("weeklySalary")) || 0;
@@ -1608,6 +1702,8 @@
         wasSaved = saveFixedExpense(formData, recordId);
       } else if (sheetType === "envelope") {
         wasSaved = saveEnvelope(formData, recordId);
+      } else if (sheetType === "coverage") {
+        wasSaved = saveCoverage(formData);
       } else {
         wasSaved = saveSettings(formData);
       }
@@ -1648,6 +1744,8 @@
         appData.fixedExpenses = appData.fixedExpenses.filter(keepOthers);
       } else if (sheetType === "envelope") {
         appData.envelopes = appData.envelopes.filter(keepOthers);
+      } else if (sheetType === "coverage") {
+        delete appData.savingsCoverages[sheetEditingId];
       }
 
       saveData();
@@ -1814,6 +1912,8 @@
         openSheet("fixed", recordId);
       } else if (action === "edit-envelope") {
         openSheet("envelope", recordId);
+      } else if (action === "edit-coverage") {
+        openSheet("coverage", recordId);
       } else if (action === "add-envelope") {
         openSheet("envelope");
       } else if (action === "edit-settings") {
