@@ -1,0 +1,1898 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Finanzas">
+  <meta name="theme-color" content="#0f1115">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.png">
+  <title>Finanzas</title>
+  <style>
+    :root {
+      --background: #0f1115;
+      --surface: #191c23;
+      --surface-light: #232733;
+      --border: #2c313d;
+      --text: #f2f3f5;
+      --text-muted: #9aa1ad;
+      --accent: #4fd1a5;
+      --danger: #ff6b6b;
+      --warning: #f5c451;
+      --card-color: #7aa2ff;
+      --envelope-color: #c792ea;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    html, body {
+      background: var(--background);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+      font-size: 16px;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    body { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+
+    .top-bar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: calc(env(safe-area-inset-top) + 12px) 16px 12px;
+      background: rgba(15, 17, 21, 0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .top-bar h1 { font-size: 24px; font-weight: 700; }
+
+    .month-picker {
+      background: var(--surface-light);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 10px;
+      font-size: 15px;
+      font-family: inherit;
+    }
+
+    main { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+    }
+
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .big-number { font-size: 34px; font-weight: 700; letter-spacing: -0.5px; }
+
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 14px; }
+
+    .stat-label { font-size: 12px; color: var(--text-muted); }
+    .stat-value { font-size: 16px; font-weight: 600; margin-top: 2px; }
+
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .row:last-child { border-bottom: none; }
+    .row-main { flex: 1; min-width: 0; }
+    .row-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row-subtitle { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+    .row-amount { font-weight: 600; white-space: nowrap; text-align: right; }
+
+    .tappable { cursor: pointer; }
+    .tappable:active { opacity: 0.6; }
+
+    .bar-track { height: 6px; background: var(--surface-light); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 3px; background: var(--accent); }
+
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+      background: var(--surface-light);
+      color: var(--text-muted);
+      vertical-align: middle;
+    }
+
+    .badge.paid { background: rgba(79, 209, 165, 0.15); color: var(--accent); }
+    .badge.pending { background: rgba(245, 196, 81, 0.15); color: var(--warning); }
+    .badge.overdue { background: rgba(255, 107, 107, 0.15); color: var(--danger); }
+
+    .check-button {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      background: transparent;
+      color: var(--background);
+      font-size: 16px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .check-button.checked { background: var(--accent); border-color: var(--accent); }
+
+    .empty-state { text-align: center; color: var(--text-muted); padding: 24px 10px; font-size: 15px; }
+
+    .warning-text { color: var(--danger); font-size: 14px; font-weight: 600; margin-top: 10px; }
+
+    .day-header {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      padding: 14px 0 4px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .week-navigator { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .week-label { text-align: center; font-weight: 600; }
+
+    .icon-button {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: none;
+      background: var(--surface-light);
+      color: var(--text);
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+
+    .link-button {
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+    }
+
+    .add-button {
+      position: fixed;
+      right: 20px;
+      bottom: calc(84px + env(safe-area-inset-bottom));
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      border: none;
+      background: var(--accent);
+      color: var(--background);
+      font-size: 32px;
+      font-weight: 400;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+      z-index: 20;
+    }
+
+    .add-button.hidden { display: none; }
+
+    .tab-bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 20;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+      background: rgba(25, 28, 35, 0.95);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-top: 1px solid var(--border);
+    }
+
+    .tab-button {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-family: inherit;
+      font-size: 11px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .tab-button .tab-icon { font-size: 20px; }
+    .tab-button.active { color: var(--accent); }
+
+    .sheet-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      background: rgba(0, 0, 0, 0.55);
+      display: flex;
+      align-items: flex-end;
+    }
+
+    .sheet-overlay.hidden { display: none; }
+
+    .sheet {
+      width: 100%;
+      max-height: 92vh;
+      overflow-y: auto;
+      background: var(--surface);
+      border-radius: 20px 20px 0 0;
+      padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+    }
+
+    .sheet-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .sheet-header h2 { font-size: 20px; }
+
+    .text-button { background: none; border: none; color: var(--accent); font-size: 16px; font-family: inherit; }
+
+    .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+    .field label { font-size: 13px; color: var(--text-muted); font-weight: 600; }
+    .field.hidden { display: none; }
+
+    .field input, .field select {
+      width: 100%;
+      background: var(--surface-light);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 16px;
+      font-family: inherit;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .checkbox-field { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 15px; }
+    .checkbox-field input { width: 22px; height: 22px; accent-color: var(--accent); }
+
+    .helper-text { font-size: 13px; color: var(--text-muted); margin: -6px 0 14px; }
+    .hint-text { font-size: 14px; color: var(--accent); margin: -4px 0 14px; min-height: 1px; }
+
+    .primary-button, .danger-button, .secondary-button {
+      width: 100%;
+      border: none;
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: 600;
+      font-family: inherit;
+      margin-top: 6px;
+    }
+
+    .primary-button { background: var(--accent); color: var(--background); }
+    .danger-button { background: rgba(255, 107, 107, 0.12); color: var(--danger); }
+    .secondary-button { background: var(--surface-light); color: var(--text); }
+  </style>
+</head>
+<body>
+  <header class="top-bar">
+    <h1 id="screenTitle">Semana</h1>
+    <input type="month" id="monthPicker" class="month-picker">
+  </header>
+
+  <main id="content"></main>
+
+  <button id="addButton" class="add-button" aria-label="Agregar">+</button>
+
+  <nav class="tab-bar">
+    <button class="tab-button active" data-screen="week"><span class="tab-icon">📅</span>Semana</button>
+    <button class="tab-button" data-screen="expenses"><span class="tab-icon">🧾</span>Gastos</button>
+    <button class="tab-button" data-screen="cards"><span class="tab-icon">💳</span>Tarjetas</button>
+    <button class="tab-button" data-screen="fixed"><span class="tab-icon">📌</span>Fijos</button>
+    <button class="tab-button" data-screen="settings"><span class="tab-icon">⚙️</span>Ajustes</button>
+  </nav>
+
+  <div id="sheetOverlay" class="sheet-overlay hidden">
+    <div class="sheet">
+      <form id="sheetForm" autocomplete="off"></form>
+    </div>
+  </div>
+
+  <input type="file" id="importInput" accept="application/json,.json" hidden>
+
+  <script>
+    const storageKey = "financeLog.v2";
+
+    const expenseCategories = [
+      "Comida", "Súper", "Transporte", "Gasolina", "Hogar", "Servicios",
+      "Salud", "Entretenimiento", "Ropa", "Arte", "Suscripciones", "Otros"
+    ];
+
+    const paymentMethodLabels = {
+      cash: "Efectivo",
+      debit: "Débito / transferencia",
+      card: "Tarjeta de crédito",
+      installments: "MSI"
+    };
+
+    const frequencyOptions = [
+      { months: 1, label: "Mensual" },
+      { months: 2, label: "Bimestral" },
+      { months: 3, label: "Trimestral" },
+      { months: 6, label: "Semestral" },
+      { months: 12, label: "Anual" }
+    ];
+
+    const weekDayNames = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+
+    const screenTitles = {
+      week: "Semana",
+      expenses: "Gastos",
+      cards: "Tarjetas",
+      fixed: "Gastos fijos",
+      settings: "Ajustes"
+    };
+
+    let appData = loadData();
+    let currentScreen = "week";
+    let selectedMonth = getMonthKey(new Date());
+    let selectedWeekStart = getWeekStart(getTodayDateString());
+    let sheetType = null;
+    let sheetEditingId = null;
+
+    // ---------- Storage ----------
+
+    /** Returns a new empty data structure. */
+    function createEmptyData() {
+      return {
+        settings: { weeklySalary: 0, paydayDayOfWeek: 4, trackingStartDate: getTodayDateString() },
+        cards: [],
+        expenses: [],
+        fixedExpenses: [],
+        envelopes: []
+      };
+    }
+
+    /** Reads the saved data from the phone, or returns empty data. */
+    function loadData() {
+      const emptyData = createEmptyData();
+      try {
+        const storedText = localStorage.getItem(storageKey);
+        if (!storedText) {
+          return emptyData;
+        }
+        return normalizeData(JSON.parse(storedText));
+      } catch (error) {
+        return emptyData;
+      }
+    }
+
+    /** Makes sure every list and setting exists in loaded or imported data. */
+    function normalizeData(rawData) {
+      const emptyData = createEmptyData();
+      const rawSettings = rawData.settings || {};
+      return {
+        settings: {
+          weeklySalary: Number(rawSettings.weeklySalary) || 0,
+          paydayDayOfWeek: rawSettings.paydayDayOfWeek == null ? emptyData.settings.paydayDayOfWeek : Number(rawSettings.paydayDayOfWeek),
+          trackingStartDate: rawSettings.trackingStartDate || emptyData.settings.trackingStartDate
+        },
+        cards: Array.isArray(rawData.cards) ? rawData.cards : [],
+        expenses: Array.isArray(rawData.expenses) ? rawData.expenses : [],
+        fixedExpenses: Array.isArray(rawData.fixedExpenses) ? rawData.fixedExpenses : [],
+        envelopes: Array.isArray(rawData.envelopes) ? rawData.envelopes : []
+      };
+    }
+
+    /** Saves all the data on the phone. */
+    function saveData() {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(appData));
+      } catch (error) {
+        alert("No se pudo guardar. Exporta un respaldo.");
+      }
+    }
+
+    /** Creates a unique id for a new record. */
+    function createId() {
+      return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    }
+
+    /** Finds a record by id inside a list. */
+    function findRecord(records, recordId) {
+      if (!recordId) {
+        return null;
+      }
+      return records.find(function (record) {
+        return record.id === recordId;
+      }) || null;
+    }
+
+    /** Inserts a new record or replaces the existing one with the same id. */
+    function upsertRecord(records, record) {
+      const existingIndex = records.findIndex(function (item) {
+        return item.id === record.id;
+      });
+      if (existingIndex === -1) {
+        records.push(record);
+      } else {
+        records[existingIndex] = record;
+      }
+    }
+
+    // ---------- Date helpers ----------
+
+    /** Returns a month key like "2026-11" for a date. */
+    function getMonthKey(date) {
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      return date.getFullYear() + "-" + month;
+    }
+
+    /** Converts a date into a "YYYY-MM-DD" string. */
+    function toDateString(date) {
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return date.getFullYear() + "-" + month + "-" + day;
+    }
+
+    /** Returns today's date as "YYYY-MM-DD". */
+    function getTodayDateString() {
+      return toDateString(new Date());
+    }
+
+    /** Converts a "YYYY-MM-DD" string into a local Date. */
+    function parseDateString(dateString) {
+      const parts = dateString.split("-");
+      return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    }
+
+    /** Builds a date string for a year, month and day, moving the day back if the month is shorter. */
+    function createClampedDateString(year, monthIndex, day) {
+      const normalizedYear = year + Math.floor(monthIndex / 12);
+      const normalizedMonth = ((monthIndex % 12) + 12) % 12;
+      const lastDayOfMonth = new Date(normalizedYear, normalizedMonth + 1, 0).getDate();
+      return toDateString(new Date(normalizedYear, normalizedMonth, Math.min(day, lastDayOfMonth)));
+    }
+
+    /** Adds months to a date string, keeping the day inside the target month. */
+    function addMonthsToDateString(dateString, monthsToAdd) {
+      const date = parseDateString(dateString);
+      return createClampedDateString(date.getFullYear(), date.getMonth() + monthsToAdd, date.getDate());
+    }
+
+    /** Adds days to a date string. */
+    function addDaysToDateString(dateString, daysToAdd) {
+      const date = parseDateString(dateString);
+      date.setDate(date.getDate() + daysToAdd);
+      return toDateString(date);
+    }
+
+    /** Returns the number of days between two date strings. */
+    function getDaysBetween(fromDateString, toDateStringValue) {
+      const fromDate = parseDateString(fromDateString);
+      const toDate = parseDateString(toDateStringValue);
+      const fromUtc = Date.UTC(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
+      const toUtc = Date.UTC(toDate.getFullYear(), toDate.getMonth(), toDate.getDate());
+      return Math.round((toUtc - fromUtc) / 86400000);
+    }
+
+    /** Returns the payday that starts the week a date belongs to. */
+    function getWeekStart(dateString) {
+      const date = parseDateString(dateString);
+      const daysSincePayday = (date.getDay() - appData.settings.paydayDayOfWeek + 7) % 7;
+      return addDaysToDateString(dateString, -daysSincePayday);
+    }
+
+    // ---------- Format helpers ----------
+
+    /** Formats a number as Mexican pesos. */
+    function formatMoney(amount) {
+      return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(amount || 0);
+    }
+
+    /** Formats a date string like "25 nov 2026". */
+    function formatDate(dateString) {
+      return parseDateString(dateString).toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" });
+    }
+
+    /** Formats a date string like "25 nov". */
+    function formatShortDate(dateString) {
+      return parseDateString(dateString).toLocaleDateString("es-MX", { day: "numeric", month: "short" });
+    }
+
+    /** Formats a date string like "jue 12 nov". */
+    function formatWeekDayDate(dateString) {
+      return parseDateString(dateString).toLocaleDateString("es-MX", { weekday: "short", day: "numeric", month: "short" });
+    }
+
+    /** Formats a month key as "noviembre 2026". */
+    function formatMonth(monthKey) {
+      return parseDateString(monthKey + "-01").toLocaleDateString("es-MX", { month: "long", year: "numeric" });
+    }
+
+    /** Escapes text so it can be safely inserted as HTML. */
+    function escapeHtml(text) {
+      return String(text == null ? "" : text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    /** Returns the label of a frequency in months. */
+    function getFrequencyLabel(frequencyMonths) {
+      const option = frequencyOptions.find(function (item) {
+        return item.months === Number(frequencyMonths);
+      });
+      return option ? option.label : "Cada " + frequencyMonths + " meses";
+    }
+
+    /** Returns a readable payment method, including the card name when there is one. */
+    function getPaymentMethodText(paymentMethod, cardId) {
+      const label = paymentMethodLabels[paymentMethod] || paymentMethod;
+      if (paymentMethod === "card" || paymentMethod === "installments") {
+        const card = findRecord(appData.cards, cardId);
+        return (paymentMethod === "installments" ? "MSI" : "Tarjeta") + " " + (card ? card.name : "(eliminada)");
+      }
+      return label;
+    }
+
+    // ---------- Credit card statements ----------
+    // A statement is identified by its cutoff date ("YYYY-MM-DD").
+
+    /** Returns the cutoff date of a card for a given month. */
+    function getCutoffDate(card, year, monthIndex) {
+      return createClampedDateString(year, monthIndex, Number(card.cutoffDay));
+    }
+
+    /** Returns the statement (cutoff date) where a purchase made on a date is billed. */
+    function getStatementKeyForDate(card, dateString) {
+      const date = parseDateString(dateString);
+      const cutoffThisMonth = getCutoffDate(card, date.getFullYear(), date.getMonth());
+      if (dateString <= cutoffThisMonth) {
+        return cutoffThisMonth;
+      }
+      return getCutoffDate(card, date.getFullYear(), date.getMonth() + 1);
+    }
+
+    /** Moves a statement key forward or backward a number of months. */
+    function shiftStatementKey(card, statementKey, monthsToShift) {
+      const date = parseDateString(statementKey);
+      return getCutoffDate(card, date.getFullYear(), date.getMonth() + monthsToShift);
+    }
+
+    /** Returns the payment due date of a statement. */
+    function getStatementDueDate(card, statementKey) {
+      const cutoffDate = parseDateString(statementKey);
+      if (Number(card.paymentDay) > Number(card.cutoffDay)) {
+        return createClampedDateString(cutoffDate.getFullYear(), cutoffDate.getMonth(), Number(card.paymentDay));
+      }
+      return createClampedDateString(cutoffDate.getFullYear(), cutoffDate.getMonth() + 1, Number(card.paymentDay));
+    }
+
+    /** Returns the statement whose payment is the next one to make. */
+    function getNextPaymentStatementKey(card, todayDateString) {
+      const openStatementKey = getStatementKeyForDate(card, todayDateString);
+      const lastClosedStatementKey = shiftStatementKey(card, openStatementKey, -1);
+      if (getStatementDueDate(card, lastClosedStatementKey) >= todayDateString) {
+        return lastClosedStatementKey;
+      }
+      return openStatementKey;
+    }
+
+    /** Checks if a statement of a card is marked as paid. */
+    function isStatementPaid(card, statementKey) {
+      return Array.isArray(card.paidStatementKeys) && card.paidStatementKeys.indexOf(statementKey) !== -1;
+    }
+
+    /** Returns each monthly payment of an MSI expense with its statement and due date. */
+    function getInstallmentSchedule(expense) {
+      const card = findRecord(appData.cards, expense.cardId);
+      if (!card) {
+        return [];
+      }
+
+      const schedule = [];
+      const firstStatementKey = getStatementKeyForDate(card, expense.date);
+      const monthlyAmount = Number(expense.amount) / Number(expense.months);
+      let previousDueDate = expense.date;
+
+      for (let index = 0; index < Number(expense.months); index++) {
+        const statementKey = shiftStatementKey(card, firstStatementKey, index);
+        const dueDate = getStatementDueDate(card, statementKey);
+        schedule.push({
+          number: index + 1,
+          statementKey: statementKey,
+          dueDate: dueDate,
+          startDate: previousDueDate,
+          amount: monthlyAmount,
+          isPaid: isStatementPaid(card, statementKey)
+        });
+        previousDueDate = dueDate;
+      }
+
+      return schedule;
+    }
+
+    // ---------- Fixed expenses ----------
+
+    /** Returns the charge dates of a fixed expense from its next charge date up to two years ahead. */
+    function getFixedOccurrences(fixedExpense) {
+      const occurrences = [];
+      const limitDate = addDaysToDateString(getTodayDateString(), 730);
+      const frequencyMonths = Number(fixedExpense.frequencyMonths);
+
+      for (let index = 0; index < 400; index++) {
+        const occurrenceDate = addMonthsToDateString(fixedExpense.nextChargeDate, index * frequencyMonths);
+        if (occurrenceDate > limitDate) {
+          break;
+        }
+        occurrences.push({
+          date: occurrenceDate,
+          previousDate: addMonthsToDateString(fixedExpense.nextChargeDate, (index - 1) * frequencyMonths)
+        });
+      }
+
+      return occurrences;
+    }
+
+    /** Returns the expense created when a fixed expense charge was registered, or null. */
+    function getRegisteredExpense(fixedExpenseId, occurrenceDate) {
+      return appData.expenses.find(function (expense) {
+        return expense.fixedExpenseId === fixedExpenseId && expense.occurrenceDate === occurrenceDate;
+      }) || null;
+    }
+
+    // ---------- Payment items and weekly plan ----------
+    // A payment item is something that must be paid on a due date and is saved for week by week.
+
+    /** Creates a payment item that belongs to a credit card statement. */
+    function createCardItem(card, statementKey, label, amount, startDate) {
+      return {
+        groupKey: "card-" + card.id + "-" + statementKey,
+        groupLabel: "💳 " + card.name,
+        groupType: "card",
+        cardId: card.id,
+        statementKey: statementKey,
+        label: label,
+        amount: amount,
+        startDate: startDate,
+        dueDate: getStatementDueDate(card, statementKey),
+        isPaid: isStatementPaid(card, statementKey)
+      };
+    }
+
+    /** Builds every payment item from cards, the expense log and fixed expenses. */
+    function buildPaymentItems() {
+      const items = [];
+
+      appData.cards.forEach(function (card) {
+        if (Number(card.initialBalance) > 0 && card.initialBalanceStatementKey) {
+          items.push(createCardItem(card, card.initialBalanceStatementKey, "Saldo inicial", Number(card.initialBalance), card.createdDate));
+        }
+      });
+
+      appData.expenses.forEach(function (expense) {
+        if (expense.paymentMethod === "card") {
+          const card = findRecord(appData.cards, expense.cardId);
+          if (card) {
+            const statementKey = getStatementKeyForDate(card, expense.date);
+            items.push(createCardItem(card, statementKey, expense.description, Number(expense.amount), expense.date));
+          }
+        } else if (expense.paymentMethod === "installments") {
+          const card = findRecord(appData.cards, expense.cardId);
+          if (card) {
+            getInstallmentSchedule(expense).forEach(function (installment) {
+              const label = expense.description + " (" + installment.number + "/" + expense.months + ")";
+              items.push(createCardItem(card, installment.statementKey, label, installment.amount, installment.startDate));
+            });
+          }
+        }
+      });
+
+      appData.fixedExpenses.forEach(function (fixedExpense) {
+        if (!fixedExpense.isActive) {
+          return;
+        }
+
+        getFixedOccurrences(fixedExpense).forEach(function (occurrence) {
+          if (getRegisteredExpense(fixedExpense.id, occurrence.date)) {
+            return;
+          }
+
+          if (fixedExpense.paymentMethod === "card") {
+            const card = findRecord(appData.cards, fixedExpense.cardId);
+            if (card) {
+              const statementKey = getStatementKeyForDate(card, occurrence.date);
+              items.push(createCardItem(card, statementKey, fixedExpense.name, Number(fixedExpense.amount), occurrence.previousDate));
+            }
+          } else {
+            items.push({
+              groupKey: "fixed-" + fixedExpense.id + "-" + occurrence.date,
+              groupLabel: "📌 " + fixedExpense.name,
+              groupType: "fixed",
+              label: fixedExpense.name,
+              amount: Number(fixedExpense.amount),
+              startDate: occurrence.previousDate,
+              dueDate: occurrence.date,
+              isPaid: false
+            });
+          }
+        });
+      });
+
+      return items;
+    }
+
+    /** Returns how much of an item must be saved in a week, splitting it across the paydays before its due date. Weeks before the app was first used are skipped. */
+    function getWeeklyShare(item, weekStart) {
+      let firstWeek = getWeekStart(item.startDate);
+      const trackingStartWeek = getWeekStart(appData.settings.trackingStartDate);
+      if (firstWeek < trackingStartWeek) {
+        firstWeek = trackingStartWeek;
+      }
+      let lastWeek = getWeekStart(addDaysToDateString(item.dueDate, -1));
+      if (lastWeek < firstWeek) {
+        lastWeek = firstWeek;
+      }
+      if (weekStart < firstWeek || weekStart > lastWeek) {
+        return 0;
+      }
+      const numberOfWeeks = getDaysBetween(firstWeek, lastWeek) / 7 + 1;
+      return item.amount / numberOfWeeks;
+    }
+
+    /** Returns the sum of the weekly amounts of all envelopes. */
+    function getEnvelopeTotal() {
+      let total = 0;
+      appData.envelopes.forEach(function (envelope) {
+        total += Number(envelope.weeklyAmount) || 0;
+      });
+      return total;
+    }
+
+    /** Calculates what must be set aside in a week, grouped by card payment or fixed expense. */
+    function getWeekPlan(weekStart) {
+      const groups = {};
+
+      buildPaymentItems().forEach(function (item) {
+        if (item.isPaid) {
+          return;
+        }
+        if (!groups[item.groupKey]) {
+          groups[item.groupKey] = {
+            label: item.groupLabel,
+            groupType: item.groupType,
+            dueDate: item.dueDate,
+            totalAmount: 0,
+            weeklyAmount: 0
+          };
+        }
+        groups[item.groupKey].totalAmount += item.amount;
+        groups[item.groupKey].weeklyAmount += getWeeklyShare(item, weekStart);
+      });
+
+      const rows = Object.keys(groups).map(function (groupKey) {
+        return groups[groupKey];
+      }).filter(function (group) {
+        return group.weeklyAmount > 0.005;
+      });
+
+      rows.sort(function (first, second) {
+        return first.dueDate.localeCompare(second.dueDate);
+      });
+
+      let paymentTotal = 0;
+      rows.forEach(function (row) {
+        paymentTotal += row.weeklyAmount;
+      });
+
+      const envelopeTotal = getEnvelopeTotal();
+      const salary = Number(appData.settings.weeklySalary) || 0;
+
+      return {
+        rows: rows,
+        paymentTotal: paymentTotal,
+        envelopeTotal: envelopeTotal,
+        salary: salary,
+        freeAmount: salary - paymentTotal - envelopeTotal
+      };
+    }
+
+    // ---------- Monthly spending ----------
+
+    /** Returns the month total and totals by category; MSI purchases count only the payments due that month. */
+    function getMonthSpending(monthKey) {
+      const totalsByCategory = {};
+      let total = 0;
+
+      /** Adds an amount to the month total and to its category. */
+      function addAmount(category, amount) {
+        total += amount;
+        if (!totalsByCategory[category]) {
+          totalsByCategory[category] = 0;
+        }
+        totalsByCategory[category] += amount;
+      }
+
+      appData.expenses.forEach(function (expense) {
+        if (expense.paymentMethod === "installments") {
+          getInstallmentSchedule(expense).forEach(function (installment) {
+            if (installment.dueDate.slice(0, 7) === monthKey) {
+              addAmount(expense.category, installment.amount);
+            }
+          });
+        } else if (expense.date.slice(0, 7) === monthKey) {
+          addAmount(expense.category, Number(expense.amount));
+        }
+      });
+
+      return { total: total, totalsByCategory: totalsByCategory };
+    }
+
+    // ---------- Rendering ----------
+
+    /** Draws the current screen. */
+    function render() {
+      document.getElementById("screenTitle").textContent = screenTitles[currentScreen];
+
+      const showMonthPicker = currentScreen === "expenses" || currentScreen === "fixed";
+      document.getElementById("monthPicker").style.visibility = showMonthPicker ? "visible" : "hidden";
+      document.getElementById("addButton").classList.toggle("hidden", currentScreen === "settings");
+
+      document.querySelectorAll(".tab-button").forEach(function (button) {
+        button.classList.toggle("active", button.dataset.screen === currentScreen);
+      });
+
+      const content = document.getElementById("content");
+      if (currentScreen === "week") {
+        content.innerHTML = renderWeek();
+      } else if (currentScreen === "expenses") {
+        content.innerHTML = renderExpenses();
+      } else if (currentScreen === "cards") {
+        content.innerHTML = renderCards();
+      } else if (currentScreen === "fixed") {
+        content.innerHTML = renderFixedExpenses();
+      } else {
+        content.innerHTML = renderSettings();
+      }
+    }
+
+    /** Builds the weekly set-aside screen. */
+    function renderWeek() {
+      const weekEnd = addDaysToDateString(selectedWeekStart, 6);
+      const currentWeekStart = getWeekStart(getTodayDateString());
+      const plan = getWeekPlan(selectedWeekStart);
+
+      let html = '<div class="card week-navigator">' +
+        '<button class="icon-button" data-action="previous-week">‹</button>' +
+        '<div class="week-label">' + escapeHtml(formatWeekDayDate(selectedWeekStart)) + ' – ' + escapeHtml(formatWeekDayDate(weekEnd)) +
+          (selectedWeekStart === currentWeekStart ? '<div class="row-subtitle">Esta semana</div>' : '<div><button class="link-button" data-action="current-week">Ir a esta semana</button></div>') +
+        '</div>' +
+        '<button class="icon-button" data-action="next-week">›</button>' +
+      '</div>';
+
+      if (plan.salary <= 0) {
+        html += '<div class="card"><div class="empty-state">Configura tu sueldo semanal para calcular lo que te queda libre.<br><br>' +
+          '<button class="primary-button" data-action="edit-settings">Configurar sueldo</button></div></div>';
+      }
+
+      html += '<div class="card">' +
+        '<div class="card-title">Libre esta semana</div>' +
+        '<div class="big-number" style="color:' + (plan.freeAmount < 0 ? 'var(--danger)' : 'var(--text)') + '">' + formatMoney(plan.freeAmount) + '</div>' +
+        '<div class="stat-grid">' +
+          '<div><div class="stat-label">Sueldo</div><div class="stat-value">' + formatMoney(plan.salary) + '</div></div>' +
+          '<div><div class="stat-label">Pagos</div><div class="stat-value" style="color:var(--card-color)">' + formatMoney(plan.paymentTotal) + '</div></div>' +
+          '<div><div class="stat-label">Apartados</div><div class="stat-value" style="color:var(--envelope-color)">' + formatMoney(plan.envelopeTotal) + '</div></div>' +
+        '</div>' +
+        (plan.freeAmount < 0 && plan.salary > 0 ? '<div class="warning-text">Esta semana te faltan ' + formatMoney(-plan.freeAmount) + '.</div>' : '') +
+      '</div>';
+
+      html += '<div class="card"><div class="card-title">Apartar para pagos</div>';
+      if (plan.rows.length === 0) {
+        html += '<div class="empty-state">No hay pagos que apartar esta semana.</div>';
+      } else {
+        plan.rows.forEach(function (row) {
+          const isDueSoon = row.dueDate <= addDaysToDateString(weekEnd, 7);
+          html += '<div class="row">' +
+            '<div class="row-main">' +
+              '<div class="row-title">' + escapeHtml(row.label) + '</div>' +
+              '<div class="row-subtitle">Vence ' + escapeHtml(formatShortDate(row.dueDate)) + ' · total ' + formatMoney(row.totalAmount) +
+                (isDueSoon ? ' <span class="badge pending">Próximo</span>' : '') + '</div>' +
+            '</div>' +
+            '<div class="row-amount">' + formatMoney(row.weeklyAmount) + '</div>' +
+          '</div>';
+        });
+      }
+      html += '</div>';
+
+      html += '<div class="card"><div class="card-title">Apartados personales<button class="link-button" data-action="add-envelope">+ Agregar</button></div>';
+      if (appData.envelopes.length === 0) {
+        html += '<div class="empty-state">Agrega apartados como comida, ahorro o salidas.</div>';
+      } else {
+        appData.envelopes.forEach(function (envelope) {
+          html += '<div class="row tappable" data-action="edit-envelope" data-id="' + envelope.id + '">' +
+            '<div class="row-main"><div class="row-title">' + escapeHtml(envelope.name) + '</div></div>' +
+            '<div class="row-amount">' + formatMoney(envelope.weeklyAmount) + '</div>' +
+          '</div>';
+        });
+      }
+      html += '</div>';
+
+      let cashSpent = 0;
+      let cardSpent = 0;
+      appData.expenses.forEach(function (expense) {
+        if (expense.date < selectedWeekStart || expense.date > weekEnd || expense.fixedExpenseId) {
+          return;
+        }
+        if (expense.paymentMethod === "cash" || expense.paymentMethod === "debit") {
+          cashSpent += Number(expense.amount);
+        } else if (expense.paymentMethod === "card") {
+          cardSpent += Number(expense.amount);
+        }
+      });
+
+      html += '<div class="card"><div class="card-title">Gastado esta semana</div>' +
+        '<div class="row"><div class="row-main">Efectivo / débito</div><div class="row-amount">' + formatMoney(cashSpent) + '</div></div>' +
+        '<div class="row"><div class="row-main">Tarjeta (sin MSI)</div><div class="row-amount">' + formatMoney(cardSpent) + '</div></div>' +
+      '</div>';
+
+      return html;
+    }
+
+    /** Builds the expense log for the selected month, grouped by day. */
+    function renderExpenses() {
+      const monthSpending = getMonthSpending(selectedMonth);
+
+      const monthExpenses = appData.expenses.filter(function (expense) {
+        return expense.date.slice(0, 7) === selectedMonth;
+      });
+      monthExpenses.sort(function (first, second) {
+        return second.date.localeCompare(first.date);
+      });
+
+      let html = '<div class="card">' +
+        '<div class="card-title">Total de ' + escapeHtml(formatMonth(selectedMonth)) + '</div>' +
+        '<div class="big-number">' + formatMoney(monthSpending.total) + '</div>' +
+        '<div class="row-subtitle">Las compras MSI cuentan solo con la mensualidad que vence este mes.</div>' +
+      '</div>';
+
+      const categoryNames = Object.keys(monthSpending.totalsByCategory);
+      if (categoryNames.length > 0) {
+        categoryNames.sort(function (first, second) {
+          return monthSpending.totalsByCategory[second] - monthSpending.totalsByCategory[first];
+        });
+
+        html += '<div class="card"><div class="card-title">Por categoría</div>';
+        categoryNames.forEach(function (categoryName) {
+          const categoryTotal = monthSpending.totalsByCategory[categoryName];
+          const percentage = monthSpending.total > 0 ? (categoryTotal / monthSpending.total) * 100 : 0;
+          html += '<div class="row" style="display:block">' +
+            '<div style="display:flex;justify-content:space-between"><span>' + escapeHtml(categoryName) + '</span>' +
+            '<span class="row-amount">' + formatMoney(categoryTotal) + '</span></div>' +
+            '<div class="bar-track"><div class="bar-fill" style="width:' + percentage.toFixed(1) + '%"></div></div>' +
+          '</div>';
+        });
+        html += '</div>';
+      }
+
+      if (monthExpenses.length === 0) {
+        return html + '<div class="card"><div class="empty-state">Toca + para registrar un gasto.</div></div>';
+      }
+
+      html += '<div class="card" style="padding-top:4px">';
+      let currentDate = null;
+
+      monthExpenses.forEach(function (expense) {
+        if (expense.date !== currentDate) {
+          currentDate = expense.date;
+          html += '<div class="day-header"><span>' + escapeHtml(formatDate(currentDate)) + '</span></div>';
+        }
+
+        let subtitle = escapeHtml(expense.category) + ' · ' + escapeHtml(getPaymentMethodText(expense.paymentMethod, expense.cardId));
+        if (expense.paymentMethod === "installments") {
+          subtitle += ' · ' + expense.months + ' de ' + formatMoney(Number(expense.amount) / Number(expense.months));
+        }
+        if (expense.fixedExpenseId) {
+          subtitle = '📌 ' + subtitle;
+        }
+
+        html += '<div class="row tappable" data-action="edit-expense" data-id="' + expense.id + '">' +
+          '<div class="row-main"><div class="row-title">' + escapeHtml(expense.description) + '</div>' +
+          '<div class="row-subtitle">' + subtitle + '</div></div>' +
+          '<div class="row-amount">' + formatMoney(expense.amount) + '</div>' +
+        '</div>';
+      });
+
+      return html + '</div>';
+    }
+
+    /** Returns the total of a card statement from a list of payment items. */
+    function getStatementTotal(paymentItems, cardId, statementKey) {
+      let total = 0;
+      paymentItems.forEach(function (item) {
+        if (item.cardId === cardId && item.statementKey === statementKey) {
+          total += item.amount;
+        }
+      });
+      return total;
+    }
+
+    /** Builds one statement row with its paid check. */
+    function renderStatementRow(card, statementKey, title, total) {
+      const today = getTodayDateString();
+      const dueDate = getStatementDueDate(card, statementKey);
+      const isPaid = isStatementPaid(card, statementKey);
+
+      let badge = '<span class="badge pending">Pendiente</span>';
+      if (isPaid) {
+        badge = '<span class="badge paid">Pagado</span>';
+      } else if (dueDate < today) {
+        badge = '<span class="badge overdue">Vencido</span>';
+      }
+
+      return '<div class="row">' +
+        '<button class="check-button' + (isPaid ? ' checked' : '') + '" data-action="toggle-statement" data-id="' + card.id + '" data-statement="' + statementKey + '">' + (isPaid ? '✓' : '') + '</button>' +
+        '<div class="row-main">' +
+          '<div class="row-title">' + title + '</div>' +
+          '<div class="row-subtitle">Corte ' + escapeHtml(formatShortDate(statementKey)) + ' · pago ' + escapeHtml(formatShortDate(dueDate)) + ' ' + badge + '</div>' +
+        '</div>' +
+        '<div class="row-amount">' + formatMoney(total) + '</div>' +
+      '</div>';
+    }
+
+    /** Builds the credit cards screen with statements and active MSI purchases. */
+    function renderCards() {
+      if (appData.cards.length === 0) {
+        return '<div class="card"><div class="empty-state">Toca + para agregar tu primera tarjeta con su fecha de corte y de pago.</div></div>';
+      }
+
+      const today = getTodayDateString();
+      const paymentItems = buildPaymentItems();
+      let html = "";
+
+      appData.cards.forEach(function (card) {
+        const openStatementKey = getStatementKeyForDate(card, today);
+        const lastClosedStatementKey = shiftStatementKey(card, openStatementKey, -1);
+
+        html += '<div class="card">' +
+          '<div class="row tappable" data-action="edit-card" data-id="' + card.id + '" style="padding-top:0">' +
+            '<div class="row-main"><div class="row-title" style="font-size:18px">💳 ' + escapeHtml(card.name) + '</div>' +
+            '<div class="row-subtitle">Corte día ' + card.cutoffDay + ' · pago día ' + card.paymentDay + '</div></div>' +
+            '<div class="row-subtitle">Editar ›</div>' +
+          '</div>';
+
+        for (let monthsBack = 6; monthsBack >= 2; monthsBack--) {
+          const olderStatementKey = shiftStatementKey(card, openStatementKey, -monthsBack);
+          const olderTotal = getStatementTotal(paymentItems, card.id, olderStatementKey);
+          if (olderTotal > 0 && !isStatementPaid(card, olderStatementKey)) {
+            html += renderStatementRow(card, olderStatementKey, "Pago anterior", olderTotal);
+          }
+        }
+
+        html += renderStatementRow(card, lastClosedStatementKey, "Último corte", getStatementTotal(paymentItems, card.id, lastClosedStatementKey));
+        html += renderStatementRow(card, openStatementKey, "Periodo actual", getStatementTotal(paymentItems, card.id, openStatementKey));
+        html += '</div>';
+      });
+
+      const installmentExpenses = appData.expenses.filter(function (expense) {
+        return expense.paymentMethod === "installments";
+      });
+
+      html += '<div class="card" style="padding-bottom:4px"><div class="card-title">Compras MSI</div>';
+
+      if (installmentExpenses.length === 0) {
+        html += '<div class="empty-state">Registra un gasto con método MSI para verlo aquí.</div>';
+      } else {
+        const purchaseRows = installmentExpenses.map(function (expense) {
+          const schedule = getInstallmentSchedule(expense);
+          let paymentsMade = 0;
+          schedule.forEach(function (installment) {
+            if (installment.isPaid || installment.dueDate < today) {
+              paymentsMade++;
+            }
+          });
+          return { expense: expense, schedule: schedule, paymentsMade: paymentsMade };
+        });
+
+        purchaseRows.sort(function (first, second) {
+          const firstFinished = first.paymentsMade >= first.expense.months ? 1 : 0;
+          const secondFinished = second.paymentsMade >= second.expense.months ? 1 : 0;
+          if (firstFinished !== secondFinished) {
+            return firstFinished - secondFinished;
+          }
+          return second.expense.date.localeCompare(first.expense.date);
+        });
+
+        purchaseRows.forEach(function (purchaseRow) {
+          const expense = purchaseRow.expense;
+          const monthlyAmount = Number(expense.amount) / Number(expense.months);
+          const paymentsLeft = expense.months - purchaseRow.paymentsMade;
+          const progressPercentage = (purchaseRow.paymentsMade / expense.months) * 100;
+          const lastDueDate = purchaseRow.schedule.length > 0 ? purchaseRow.schedule[purchaseRow.schedule.length - 1].dueDate : expense.date;
+
+          html += '<div class="row tappable" style="display:block" data-action="edit-expense" data-id="' + expense.id + '">' +
+            '<div style="display:flex;justify-content:space-between;gap:12px">' +
+              '<div class="row-main"><div class="row-title">' + escapeHtml(expense.description) + '</div>' +
+              '<div class="row-subtitle">' + escapeHtml(getPaymentMethodText("installments", expense.cardId)) + ' · ' + expense.months + ' meses</div></div>' +
+              '<div class="row-amount">' + formatMoney(monthlyAmount) + '<div class="row-subtitle">/mes</div></div>' +
+            '</div>' +
+            '<div class="bar-track"><div class="bar-fill" style="width:' + progressPercentage.toFixed(1) + '%;background:var(--envelope-color)"></div></div>' +
+            '<div class="row-subtitle" style="display:flex;justify-content:space-between;margin-top:6px">' +
+              '<span>' + (paymentsLeft <= 0 ? 'Liquidada ✅' : 'Pagos: ' + purchaseRow.paymentsMade + ' de ' + expense.months) + '</span>' +
+              '<span>Resta ' + formatMoney(Math.max(paymentsLeft, 0) * monthlyAmount) + '</span>' +
+            '</div>' +
+            '<div class="row-subtitle">Total ' + formatMoney(expense.amount) + ' · último pago ' + escapeHtml(formatDate(lastDueDate)) + '</div>' +
+          '</div>';
+        });
+      }
+
+      return html + '</div>';
+    }
+
+    /** Builds the fixed expenses screen: charges of the selected month and the full list. */
+    function renderFixedExpenses() {
+      const today = getTodayDateString();
+      const monthCharges = [];
+
+      appData.fixedExpenses.forEach(function (fixedExpense) {
+        if (!fixedExpense.isActive) {
+          return;
+        }
+        getFixedOccurrences(fixedExpense).forEach(function (occurrence) {
+          if (occurrence.date.slice(0, 7) === selectedMonth) {
+            monthCharges.push({ fixedExpense: fixedExpense, date: occurrence.date });
+          }
+        });
+      });
+
+      monthCharges.sort(function (first, second) {
+        return first.date.localeCompare(second.date);
+      });
+
+      let html = '<div class="card" style="padding-bottom:4px"><div class="card-title">Cobros de ' + escapeHtml(formatMonth(selectedMonth)) + '</div>';
+
+      if (monthCharges.length === 0) {
+        html += '<div class="empty-state">No hay cobros fijos este mes.</div>';
+      } else {
+        html += '<p class="row-subtitle" style="margin-bottom:4px">Marca un cobro cuando se haga para pasarlo a la bitácora. Ahí puedes ajustar el monto real.</p>';
+        monthCharges.forEach(function (charge) {
+          const registeredExpense = getRegisteredExpense(charge.fixedExpense.id, charge.date);
+          const amount = registeredExpense ? registeredExpense.amount : charge.fixedExpense.amount;
+          html += '<div class="row">' +
+            '<button class="check-button' + (registeredExpense ? ' checked' : '') + '" data-action="toggle-fixed-charge" data-id="' + charge.fixedExpense.id + '" data-date="' + charge.date + '">' + (registeredExpense ? '✓' : '') + '</button>' +
+            '<div class="row-main"><div class="row-title">' + escapeHtml(charge.fixedExpense.name) + '</div>' +
+            '<div class="row-subtitle">' + escapeHtml(formatShortDate(charge.date)) + ' · ' + escapeHtml(getPaymentMethodText(charge.fixedExpense.paymentMethod, charge.fixedExpense.cardId)) + '</div></div>' +
+            '<div class="row-amount">' + formatMoney(amount) + '</div>' +
+          '</div>';
+        });
+      }
+      html += '</div>';
+
+      html += '<div class="card" style="padding-bottom:4px"><div class="card-title">Todos tus fijos</div>';
+
+      if (appData.fixedExpenses.length === 0) {
+        return html + '<div class="empty-state">Toca + para agregar renta, luz, internet, suscripciones…</div></div>';
+      }
+
+      const sortedFixedExpenses = appData.fixedExpenses.slice();
+      sortedFixedExpenses.sort(function (first, second) {
+        return first.name.localeCompare(second.name);
+      });
+
+      sortedFixedExpenses.forEach(function (fixedExpense) {
+        const nextOccurrence = getFixedOccurrences(fixedExpense).find(function (occurrence) {
+          return occurrence.date >= today;
+        });
+        const nextText = fixedExpense.isActive
+          ? (nextOccurrence ? 'próximo ' + formatShortDate(nextOccurrence.date) : '')
+          : '<span class="badge">Inactivo</span>';
+
+        html += '<div class="row tappable" data-action="edit-fixed" data-id="' + fixedExpense.id + '">' +
+          '<div class="row-main"><div class="row-title">' + escapeHtml(fixedExpense.name) + '</div>' +
+          '<div class="row-subtitle">' + escapeHtml(getFrequencyLabel(fixedExpense.frequencyMonths)) + ' · ' + escapeHtml(getPaymentMethodText(fixedExpense.paymentMethod, fixedExpense.cardId)) + ' · ' + nextText + '</div></div>' +
+          '<div class="row-amount">' + formatMoney(fixedExpense.amount) + '</div>' +
+        '</div>';
+      });
+
+      return html + '</div>';
+    }
+
+    /** Builds the settings screen: salary, envelopes and backup. */
+    function renderSettings() {
+      let html = '<div class="card">' +
+        '<div class="card-title">Sueldo<button class="link-button" data-action="edit-settings">Editar</button></div>' +
+        '<div class="row"><div class="row-main">Sueldo semanal</div><div class="row-amount">' + formatMoney(appData.settings.weeklySalary) + '</div></div>' +
+        '<div class="row"><div class="row-main">Día de pago</div><div class="row-amount">' + weekDayNames[appData.settings.paydayDayOfWeek] + '</div></div>' +
+      '</div>';
+
+      html += '<div class="card"><div class="card-title">Apartados personales<button class="link-button" data-action="add-envelope">+ Agregar</button></div>';
+      if (appData.envelopes.length === 0) {
+        html += '<div class="empty-state">Sin apartados.</div>';
+      } else {
+        appData.envelopes.forEach(function (envelope) {
+          html += '<div class="row tappable" data-action="edit-envelope" data-id="' + envelope.id + '">' +
+            '<div class="row-main">' + escapeHtml(envelope.name) + '</div>' +
+            '<div class="row-amount">' + formatMoney(envelope.weeklyAmount) + '</div>' +
+          '</div>';
+        });
+        html += '<div class="row"><div class="row-main row-subtitle">Total semanal</div><div class="row-amount">' + formatMoney(getEnvelopeTotal()) + '</div></div>';
+      }
+      html += '</div>';
+
+      html += '<div class="card">' +
+          '<div class="card-title">Respaldo</div>' +
+          '<p class="row-subtitle" style="margin-bottom:12px">Tus datos viven solo en este iPhone. Exporta un respaldo de vez en cuando y guárdalo en Archivos o iCloud Drive.</p>' +
+          '<button class="primary-button" data-action="export">Exportar respaldo</button>' +
+          '<button class="secondary-button" data-action="import">Importar respaldo</button>' +
+        '</div>' +
+        '<div class="card">' +
+          '<div class="card-title">Zona de peligro</div>' +
+          '<button class="danger-button" data-action="delete-all">Borrar todos los datos</button>' +
+        '</div>';
+
+      return html;
+    }
+
+    // ---------- Forms (bottom sheet) ----------
+
+    /** Builds option tags from a list of values, marking the selected one. */
+    function buildOptions(options, selectedValue) {
+      let html = "";
+      options.forEach(function (option) {
+        html += '<option value="' + escapeHtml(option) + '"' + (option === selectedValue ? " selected" : "") + '>' + escapeHtml(option) + '</option>';
+      });
+      return html;
+    }
+
+    /** Builds option tags for payment methods. */
+    function buildPaymentMethodOptions(methodKeys, selectedMethod) {
+      let html = "";
+      methodKeys.forEach(function (methodKey) {
+        html += '<option value="' + methodKey + '"' + (methodKey === selectedMethod ? " selected" : "") + '>' + paymentMethodLabels[methodKey] + '</option>';
+      });
+      return html;
+    }
+
+    /** Builds option tags for the registered cards. */
+    function buildCardOptions(selectedCardId) {
+      if (appData.cards.length === 0) {
+        return '<option value="">Agrega una tarjeta primero</option>';
+      }
+      let html = "";
+      appData.cards.forEach(function (card) {
+        html += '<option value="' + card.id + '"' + (card.id === selectedCardId ? " selected" : "") + '>' + escapeHtml(card.name) + '</option>';
+      });
+      return html;
+    }
+
+    /** Builds the sheet header with title and cancel button. */
+    function buildSheetHeader(title) {
+      return '<div class="sheet-header"><h2>' + title + '</h2>' +
+        '<button type="button" class="text-button" data-action="close-sheet">Cancelar</button></div>';
+    }
+
+    /** Builds the save and (when editing) delete buttons. */
+    function buildSheetButtons() {
+      let html = '<button type="submit" class="primary-button">Guardar</button>';
+      if (sheetEditingId) {
+        html += '<button type="button" class="danger-button" data-action="delete-record">Eliminar</button>';
+      }
+      return html;
+    }
+
+    /** Builds the form to add or edit an expense in the log. */
+    function buildExpenseForm(expense) {
+      const defaultDate = selectedMonth === getMonthKey(new Date()) ? getTodayDateString() : selectedMonth + "-01";
+      const selectedMethod = expense ? expense.paymentMethod : "cash";
+
+      return buildSheetHeader(expense ? "Editar gasto" : "Nuevo gasto") +
+        (expense && expense.fixedExpenseId ? '<p class="helper-text" style="margin-top:0">📌 Registrado desde un gasto fijo.</p>' : '') +
+        '<div class="field"><label>Monto total</label><input name="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required value="' + (expense ? expense.amount : "") + '"></div>' +
+        '<div class="field"><label>Descripción</label><input name="description" type="text" required maxlength="80" value="' + escapeHtml(expense ? expense.description : "") + '"></div>' +
+        '<div class="field-row">' +
+          '<div class="field"><label>Categoría</label><select name="category">' + buildOptions(expenseCategories, expense ? expense.category : "Comida") + '</select></div>' +
+          '<div class="field"><label>Fecha</label><input name="date" type="date" required value="' + (expense ? expense.date : defaultDate) + '"></div>' +
+        '</div>' +
+        '<div class="field"><label>Método de pago</label><select name="paymentMethod">' + buildPaymentMethodOptions(["cash", "debit", "card", "installments"], selectedMethod) + '</select></div>' +
+        '<div class="field-row">' +
+          '<div class="field" data-show-for="card installments"><label>Tarjeta</label><select name="cardId">' + buildCardOptions(expense ? expense.cardId : null) + '</select></div>' +
+          '<div class="field" data-show-for="installments"><label>Meses</label><input name="months" type="number" inputmode="numeric" min="2" max="60" value="' + (expense && expense.months ? expense.months : "12") + '"></div>' +
+        '</div>' +
+        '<p class="hint-text" id="expenseHint"></p>' +
+        buildSheetButtons();
+    }
+
+    /** Builds the form to add or edit a credit card. */
+    function buildCardForm(card) {
+      return buildSheetHeader(card ? "Editar tarjeta" : "Nueva tarjeta") +
+        '<div class="field"><label>Nombre</label><input name="name" type="text" required maxlength="40" placeholder="Ej. BBVA Azul" value="' + escapeHtml(card ? card.name : "") + '"></div>' +
+        '<div class="field-row">' +
+          '<div class="field"><label>Día de corte</label><input name="cutoffDay" type="number" inputmode="numeric" min="1" max="31" required value="' + (card ? card.cutoffDay : "") + '"></div>' +
+          '<div class="field"><label>Día límite de pago</label><input name="paymentDay" type="number" inputmode="numeric" min="1" max="31" required value="' + (card ? card.paymentDay : "") + '"></div>' +
+        '</div>' +
+        '<div class="field"><label>Saldo pendiente actual</label><input name="initialBalance" type="number" inputmode="decimal" step="0.01" min="0" value="' + (card ? card.initialBalance : "0") + '"></div>' +
+        '<p class="helper-text">Lo que debes pagar en tu próximo pago y que no vas a registrar en Gastos. Las compras nuevas regístralas en la bitácora.</p>' +
+        buildSheetButtons();
+    }
+
+    /** Builds the form to add or edit a fixed expense. */
+    function buildFixedExpenseForm(fixedExpense) {
+      const isActive = fixedExpense ? fixedExpense.isActive : true;
+      const selectedFrequency = fixedExpense ? Number(fixedExpense.frequencyMonths) : 1;
+      let frequencyOptionsHtml = "";
+      frequencyOptions.forEach(function (option) {
+        frequencyOptionsHtml += '<option value="' + option.months + '"' + (option.months === selectedFrequency ? " selected" : "") + '>' + option.label + '</option>';
+      });
+
+      return buildSheetHeader(fixedExpense ? "Editar gasto fijo" : "Nuevo gasto fijo") +
+        '<div class="field"><label>Nombre</label><input name="name" type="text" required maxlength="60" placeholder="Renta, luz, Netflix…" value="' + escapeHtml(fixedExpense ? fixedExpense.name : "") + '"></div>' +
+        '<div class="field-row">' +
+          '<div class="field"><label>Monto (promedio)</label><input name="amount" type="number" inputmode="decimal" step="0.01" min="0.01" required value="' + (fixedExpense ? fixedExpense.amount : "") + '"></div>' +
+          '<div class="field"><label>Frecuencia</label><select name="frequencyMonths">' + frequencyOptionsHtml + '</select></div>' +
+        '</div>' +
+        '<div class="field"><label>Próxima fecha de cobro</label><input name="nextChargeDate" type="date" required value="' + (fixedExpense ? fixedExpense.nextChargeDate : getTodayDateString()) + '"></div>' +
+        '<div class="field-row">' +
+          '<div class="field"><label>Categoría</label><select name="category">' + buildOptions(expenseCategories, fixedExpense ? fixedExpense.category : "Servicios") + '</select></div>' +
+          '<div class="field"><label>Se paga con</label><select name="paymentMethod">' + buildPaymentMethodOptions(["cash", "debit", "card"], fixedExpense ? fixedExpense.paymentMethod : "debit") + '</select></div>' +
+        '</div>' +
+        '<div class="field" data-show-for="card"><label>Tarjeta</label><select name="cardId">' + buildCardOptions(fixedExpense ? fixedExpense.cardId : null) + '</select></div>' +
+        '<p class="helper-text">Si se carga a tarjeta, se suma al pago de esa tarjeta y no se aparta por separado.</p>' +
+        '<label class="checkbox-field"><input name="isActive" type="checkbox"' + (isActive ? " checked" : "") + '> Activo</label>' +
+        buildSheetButtons();
+    }
+
+    /** Builds the form to add or edit a personal envelope. */
+    function buildEnvelopeForm(envelope) {
+      return buildSheetHeader(envelope ? "Editar apartado" : "Nuevo apartado") +
+        '<div class="field"><label>Nombre</label><input name="name" type="text" required maxlength="40" placeholder="Comida, ahorro, salidas…" value="' + escapeHtml(envelope ? envelope.name : "") + '"></div>' +
+        '<div class="field"><label>Cantidad por semana</label><input name="weeklyAmount" type="number" inputmode="decimal" step="0.01" min="0.01" required value="' + (envelope ? envelope.weeklyAmount : "") + '"></div>' +
+        '<p class="helper-text">No puede pasar de lo que te queda libre esta semana después de los pagos.</p>' +
+        buildSheetButtons();
+    }
+
+    /** Builds the form to edit the weekly salary and payday. */
+    function buildSettingsForm() {
+      let dayOptionsHtml = "";
+      weekDayNames.forEach(function (dayName, dayIndex) {
+        dayOptionsHtml += '<option value="' + dayIndex + '"' + (dayIndex === appData.settings.paydayDayOfWeek ? " selected" : "") + '>' + dayName + '</option>';
+      });
+
+      return buildSheetHeader("Sueldo") +
+        '<div class="field"><label>Sueldo semanal</label><input name="weeklySalary" type="number" inputmode="decimal" step="0.01" min="0" required value="' + (appData.settings.weeklySalary || "") + '"></div>' +
+        '<div class="field"><label>Día de pago</label><select name="paydayDayOfWeek">' + dayOptionsHtml + '</select></div>' +
+        '<button type="submit" class="primary-button">Guardar</button>';
+    }
+
+    /** Opens the bottom sheet with the form for a record type. */
+    function openSheet(type, recordId) {
+      sheetType = type;
+      sheetEditingId = recordId || null;
+      const form = document.getElementById("sheetForm");
+
+      if (type === "expense") {
+        form.innerHTML = buildExpenseForm(findRecord(appData.expenses, recordId));
+      } else if (type === "card") {
+        form.innerHTML = buildCardForm(findRecord(appData.cards, recordId));
+      } else if (type === "fixed") {
+        form.innerHTML = buildFixedExpenseForm(findRecord(appData.fixedExpenses, recordId));
+      } else if (type === "envelope") {
+        form.innerHTML = buildEnvelopeForm(findRecord(appData.envelopes, recordId));
+      } else {
+        form.innerHTML = buildSettingsForm();
+      }
+
+      updateConditionalFields();
+      document.getElementById("sheetOverlay").classList.remove("hidden");
+    }
+
+    /** Closes the bottom sheet. */
+    function closeSheet() {
+      document.getElementById("sheetOverlay").classList.add("hidden");
+      sheetType = null;
+      sheetEditingId = null;
+    }
+
+    /** Shows the card and months fields only for the payment methods that need them, and updates the hint. */
+    function updateConditionalFields() {
+      const form = document.getElementById("sheetForm");
+      const methodField = form.elements.paymentMethod;
+      if (!methodField) {
+        return;
+      }
+
+      const selectedMethod = methodField.value;
+      form.querySelectorAll("[data-show-for]").forEach(function (field) {
+        const methods = field.dataset.showFor.split(" ");
+        field.classList.toggle("hidden", methods.indexOf(selectedMethod) === -1);
+      });
+
+      const hint = document.getElementById("expenseHint");
+      if (hint) {
+        hint.textContent = getExpenseHintText(form);
+      }
+    }
+
+    /** Builds the hint that tells in which card payment an expense will fall. */
+    function getExpenseHintText(form) {
+      const selectedMethod = form.elements.paymentMethod.value;
+      const card = findRecord(appData.cards, form.elements.cardId.value);
+      const dateValue = form.elements.date.value;
+
+      if ((selectedMethod !== "card" && selectedMethod !== "installments") || !card || !dateValue) {
+        return "";
+      }
+
+      if (selectedMethod === "card") {
+        const statementKey = getStatementKeyForDate(card, dateValue);
+        return "Entra en el pago del " + formatDate(getStatementDueDate(card, statementKey)) + ".";
+      }
+
+      const months = Number(form.elements.months.value);
+      const amount = Number(form.elements.amount.value);
+      if (!(months >= 2) || !(amount > 0)) {
+        return "";
+      }
+
+      const schedule = getInstallmentSchedule({ cardId: card.id, date: dateValue, months: months, amount: amount });
+      return formatMoney(amount / months) + " al mes · primer pago " + formatShortDate(schedule[0].dueDate) +
+        " · último " + formatDate(schedule[schedule.length - 1].dueDate) + ".";
+    }
+
+    /** Saves the expense form. Returns false when a validation fails. */
+    function saveExpense(formData, recordId) {
+      const paymentMethod = formData.get("paymentMethod");
+      const usesCard = paymentMethod === "card" || paymentMethod === "installments";
+      const cardId = usesCard ? formData.get("cardId") : null;
+
+      if (usesCard && !findRecord(appData.cards, cardId)) {
+        alert("Selecciona una tarjeta.");
+        return false;
+      }
+
+      let months = null;
+      if (paymentMethod === "installments") {
+        months = Number(formData.get("months"));
+        if (!(months >= 2)) {
+          alert("Los meses deben ser 2 o más.");
+          return false;
+        }
+      }
+
+      const existingExpense = findRecord(appData.expenses, sheetEditingId);
+      const date = formData.get("date");
+
+      upsertRecord(appData.expenses, {
+        id: recordId,
+        date: date,
+        amount: Number(formData.get("amount")),
+        description: formData.get("description").trim(),
+        category: formData.get("category"),
+        paymentMethod: paymentMethod,
+        cardId: cardId,
+        months: months,
+        fixedExpenseId: existingExpense ? existingExpense.fixedExpenseId : null,
+        occurrenceDate: existingExpense ? existingExpense.occurrenceDate : null
+      });
+
+      selectedMonth = date.slice(0, 7);
+      document.getElementById("monthPicker").value = selectedMonth;
+      return true;
+    }
+
+    /** Saves the card form. Returns false when a validation fails. */
+    function saveCard(formData, recordId) {
+      const cutoffDay = Number(formData.get("cutoffDay"));
+      const paymentDay = Number(formData.get("paymentDay"));
+      if (cutoffDay === paymentDay) {
+        alert("El día de pago no puede ser igual al de corte.");
+        return false;
+      }
+
+      const existingCard = findRecord(appData.cards, sheetEditingId);
+      const initialBalance = Number(formData.get("initialBalance")) || 0;
+      const today = getTodayDateString();
+
+      const card = {
+        id: recordId,
+        name: formData.get("name").trim(),
+        cutoffDay: cutoffDay,
+        paymentDay: paymentDay,
+        initialBalance: initialBalance,
+        initialBalanceStatementKey: existingCard ? existingCard.initialBalanceStatementKey : null,
+        createdDate: existingCard ? existingCard.createdDate : today,
+        paidStatementKeys: existingCard ? existingCard.paidStatementKeys : []
+      };
+
+      const datesChanged = !existingCard || existingCard.cutoffDay !== cutoffDay || existingCard.paymentDay !== paymentDay;
+      const balanceChanged = !existingCard || Number(existingCard.initialBalance) !== initialBalance;
+      if (datesChanged || balanceChanged) {
+        card.initialBalanceStatementKey = getNextPaymentStatementKey(card, today);
+        card.createdDate = today;
+      }
+
+      upsertRecord(appData.cards, card);
+      return true;
+    }
+
+    /** Saves the fixed expense form. Returns false when a validation fails. */
+    function saveFixedExpense(formData, recordId) {
+      const paymentMethod = formData.get("paymentMethod");
+      const cardId = paymentMethod === "card" ? formData.get("cardId") : null;
+
+      if (paymentMethod === "card" && !findRecord(appData.cards, cardId)) {
+        alert("Selecciona una tarjeta.");
+        return false;
+      }
+
+      upsertRecord(appData.fixedExpenses, {
+        id: recordId,
+        name: formData.get("name").trim(),
+        amount: Number(formData.get("amount")),
+        frequencyMonths: Number(formData.get("frequencyMonths")),
+        nextChargeDate: formData.get("nextChargeDate"),
+        category: formData.get("category"),
+        paymentMethod: paymentMethod,
+        cardId: cardId,
+        isActive: formData.get("isActive") === "on"
+      });
+      return true;
+    }
+
+    /** Saves the envelope form, checking it fits in what is free this week. Returns false when it does not fit. */
+    function saveEnvelope(formData, recordId) {
+      if (!(appData.settings.weeklySalary > 0)) {
+        alert("Primero configura tu sueldo semanal.");
+        return false;
+      }
+
+      const weeklyAmount = Number(formData.get("weeklyAmount"));
+      const existingEnvelope = findRecord(appData.envelopes, sheetEditingId);
+      const currentPlan = getWeekPlan(getWeekStart(getTodayDateString()));
+      const otherEnvelopesTotal = currentPlan.envelopeTotal - (existingEnvelope ? Number(existingEnvelope.weeklyAmount) : 0);
+      const availableAmount = currentPlan.salary - currentPlan.paymentTotal - otherEnvelopesTotal;
+
+      if (weeklyAmount > availableAmount + 0.005) {
+        alert("Solo tienes " + formatMoney(Math.max(availableAmount, 0)) + " libres esta semana.");
+        return false;
+      }
+
+      upsertRecord(appData.envelopes, {
+        id: recordId,
+        name: formData.get("name").trim(),
+        weeklyAmount: weeklyAmount
+      });
+      return true;
+    }
+
+    /** Saves the salary settings form. */
+    function saveSettings(formData) {
+      appData.settings.weeklySalary = Number(formData.get("weeklySalary")) || 0;
+      appData.settings.paydayDayOfWeek = Number(formData.get("paydayDayOfWeek"));
+      selectedWeekStart = getWeekStart(getTodayDateString());
+      return true;
+    }
+
+    /** Reads the open form and saves it with the matching function. */
+    function handleSheetSubmit(event) {
+      event.preventDefault();
+      const formData = new FormData(event.target);
+      const recordId = sheetEditingId || createId();
+      let wasSaved = false;
+
+      if (sheetType === "expense") {
+        wasSaved = saveExpense(formData, recordId);
+      } else if (sheetType === "card") {
+        wasSaved = saveCard(formData, recordId);
+      } else if (sheetType === "fixed") {
+        wasSaved = saveFixedExpense(formData, recordId);
+      } else if (sheetType === "envelope") {
+        wasSaved = saveEnvelope(formData, recordId);
+      } else {
+        wasSaved = saveSettings(formData);
+      }
+
+      if (!wasSaved) {
+        return;
+      }
+
+      saveData();
+      closeSheet();
+      render();
+    }
+
+    /** Deletes the record currently open in the sheet. */
+    function deleteCurrentRecord() {
+      if (sheetType === "card") {
+        const isUsed = appData.expenses.some(function (expense) { return expense.cardId === sheetEditingId; }) ||
+          appData.fixedExpenses.some(function (fixedExpense) { return fixedExpense.cardId === sheetEditingId; });
+        if (isUsed) {
+          alert("Esta tarjeta tiene gastos o fijos registrados. Cámbialos de tarjeta antes de eliminarla.");
+          return;
+        }
+      }
+
+      if (!confirm("¿Eliminar este registro?")) {
+        return;
+      }
+
+      const keepOthers = function (record) {
+        return record.id !== sheetEditingId;
+      };
+
+      if (sheetType === "expense") {
+        appData.expenses = appData.expenses.filter(keepOthers);
+      } else if (sheetType === "card") {
+        appData.cards = appData.cards.filter(keepOthers);
+      } else if (sheetType === "fixed") {
+        appData.fixedExpenses = appData.fixedExpenses.filter(keepOthers);
+      } else if (sheetType === "envelope") {
+        appData.envelopes = appData.envelopes.filter(keepOthers);
+      }
+
+      saveData();
+      closeSheet();
+      render();
+    }
+
+    /** Marks or unmarks a card statement as paid. */
+    function toggleStatementPaid(cardId, statementKey) {
+      const card = findRecord(appData.cards, cardId);
+      if (!card) {
+        return;
+      }
+      if (!Array.isArray(card.paidStatementKeys)) {
+        card.paidStatementKeys = [];
+      }
+
+      const statementIndex = card.paidStatementKeys.indexOf(statementKey);
+      if (statementIndex === -1) {
+        card.paidStatementKeys.push(statementKey);
+      } else {
+        card.paidStatementKeys.splice(statementIndex, 1);
+      }
+
+      saveData();
+      render();
+    }
+
+    /** Registers a fixed expense charge in the log, or removes it if it was already registered. */
+    function toggleFixedCharge(fixedExpenseId, occurrenceDate) {
+      const fixedExpense = findRecord(appData.fixedExpenses, fixedExpenseId);
+      if (!fixedExpense) {
+        return;
+      }
+
+      const registeredExpense = getRegisteredExpense(fixedExpenseId, occurrenceDate);
+      if (registeredExpense) {
+        if (!confirm("¿Quitar este cobro de la bitácora?")) {
+          return;
+        }
+        appData.expenses = appData.expenses.filter(function (expense) {
+          return expense.id !== registeredExpense.id;
+        });
+      } else {
+        appData.expenses.push({
+          id: createId(),
+          date: occurrenceDate,
+          amount: Number(fixedExpense.amount),
+          description: fixedExpense.name,
+          category: fixedExpense.category,
+          paymentMethod: fixedExpense.paymentMethod,
+          cardId: fixedExpense.paymentMethod === "card" ? fixedExpense.cardId : null,
+          months: null,
+          fixedExpenseId: fixedExpense.id,
+          occurrenceDate: occurrenceDate
+        });
+      }
+
+      saveData();
+      render();
+    }
+
+    // ---------- Backup ----------
+
+    /** Exports all data as a JSON file using the iOS share sheet when possible. */
+    async function exportData() {
+      const fileName = "finanzas-respaldo-" + getTodayDateString() + ".json";
+      const fileContent = JSON.stringify(appData, null, 2);
+      const backupFile = new File([fileContent], fileName, { type: "application/json" });
+
+      if (navigator.canShare && navigator.canShare({ files: [backupFile] })) {
+        try {
+          await navigator.share({ files: [backupFile], title: fileName });
+          return;
+        } catch (error) {
+          if (error.name === "AbortError") {
+            return;
+          }
+        }
+      }
+
+      const downloadUrl = URL.createObjectURL(backupFile);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(function () { URL.revokeObjectURL(downloadUrl); }, 1000);
+    }
+
+    /** Reads a backup JSON file and replaces the current data. */
+    function importData(file) {
+      const reader = new FileReader();
+      reader.onload = function () {
+        try {
+          const importedData = JSON.parse(reader.result);
+          const isValid = Array.isArray(importedData.cards) &&
+            Array.isArray(importedData.expenses) &&
+            Array.isArray(importedData.fixedExpenses) &&
+            Array.isArray(importedData.envelopes);
+
+          if (!isValid) {
+            alert("El archivo no es un respaldo válido.");
+            return;
+          }
+          if (!confirm("Esto reemplazará tus datos actuales. ¿Continuar?")) {
+            return;
+          }
+
+          appData = normalizeData(importedData);
+          selectedWeekStart = getWeekStart(getTodayDateString());
+          saveData();
+          render();
+          alert("Respaldo importado.");
+        } catch (error) {
+          alert("No se pudo leer el archivo.");
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    /** Deletes every record after a double confirmation. */
+    function deleteAllData() {
+      if (!confirm("¿Borrar TODOS los datos?")) {
+        return;
+      }
+      if (!confirm("Esta acción no se puede deshacer. ¿Seguro?")) {
+        return;
+      }
+      appData = createEmptyData();
+      saveData();
+      render();
+    }
+
+    // ---------- Events ----------
+
+    /** Opens the right "new" form depending on the current screen. */
+    function handleAddButtonClick() {
+      if (currentScreen === "cards") {
+        openSheet("card");
+      } else if (currentScreen === "fixed") {
+        openSheet("fixed");
+      } else {
+        openSheet("expense");
+      }
+    }
+
+    /** Handles taps on any element that has a data-action attribute. */
+    function handleActionClick(event) {
+      const actionElement = event.target.closest("[data-action]");
+      if (!actionElement) {
+        return;
+      }
+
+      const action = actionElement.dataset.action;
+      const recordId = actionElement.dataset.id;
+
+      if (action === "edit-expense") {
+        openSheet("expense", recordId);
+      } else if (action === "edit-card") {
+        openSheet("card", recordId);
+      } else if (action === "edit-fixed") {
+        openSheet("fixed", recordId);
+      } else if (action === "edit-envelope") {
+        openSheet("envelope", recordId);
+      } else if (action === "add-envelope") {
+        openSheet("envelope");
+      } else if (action === "edit-settings") {
+        openSheet("settings");
+      } else if (action === "toggle-statement") {
+        toggleStatementPaid(recordId, actionElement.dataset.statement);
+      } else if (action === "toggle-fixed-charge") {
+        toggleFixedCharge(recordId, actionElement.dataset.date);
+      } else if (action === "previous-week") {
+        selectedWeekStart = addDaysToDateString(selectedWeekStart, -7);
+        render();
+      } else if (action === "next-week") {
+        selectedWeekStart = addDaysToDateString(selectedWeekStart, 7);
+        render();
+      } else if (action === "current-week") {
+        selectedWeekStart = getWeekStart(getTodayDateString());
+        render();
+      } else if (action === "close-sheet") {
+        closeSheet();
+      } else if (action === "delete-record") {
+        deleteCurrentRecord();
+      } else if (action === "export") {
+        exportData();
+      } else if (action === "import") {
+        document.getElementById("importInput").click();
+      } else if (action === "delete-all") {
+        deleteAllData();
+      }
+    }
+
+    /** Connects all the event listeners and draws the first screen. */
+    function initializeApp() {
+      const monthPicker = document.getElementById("monthPicker");
+      monthPicker.value = selectedMonth;
+      monthPicker.addEventListener("change", function () {
+        if (monthPicker.value) {
+          selectedMonth = monthPicker.value;
+          render();
+        }
+      });
+
+      document.querySelectorAll(".tab-button").forEach(function (button) {
+        button.addEventListener("click", function () {
+          currentScreen = button.dataset.screen;
+          render();
+          window.scrollTo(0, 0);
+        });
+      });
+
+      const sheetForm = document.getElementById("sheetForm");
+      sheetForm.addEventListener("submit", handleSheetSubmit);
+      sheetForm.addEventListener("change", updateConditionalFields);
+      sheetForm.addEventListener("input", updateConditionalFields);
+
+      document.getElementById("addButton").addEventListener("click", handleAddButtonClick);
+      document.addEventListener("click", handleActionClick);
+
+      document.getElementById("sheetOverlay").addEventListener("click", function (event) {
+        if (event.target.id === "sheetOverlay") {
+          closeSheet();
+        }
+      });
+
+      document.getElementById("importInput").addEventListener("change", function (event) {
+        const selectedFile = event.target.files[0];
+        if (selectedFile) {
+          importData(selectedFile);
+        }
+        event.target.value = "";
+      });
+
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("sw.js").catch(function () {});
+      }
+
+      render();
+    }
+
+    initializeApp();
+  </script>
+</body>
+</html>
