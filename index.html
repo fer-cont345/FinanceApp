@@ -170,6 +170,24 @@
       flex-shrink: 0;
     }
 
+    .filter-row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+
+    .filter-chip {
+      flex-shrink: 0;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-muted);
+      border-radius: 20px;
+      padding: 8px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+    }
+
+    .filter-chip.active { background: var(--accent); border-color: var(--accent); color: var(--background); }
+
+    .check-button:disabled { opacity: 0.35; }
+
     .link-button {
       background: none;
       border: none;
@@ -361,6 +379,7 @@
     let sheetType = null;
     let sheetEditingId = null;
     let sheetCoverageTotal = 0;
+    let selectedExpenseFilter = "all";
 
     // ---------- Storage ----------
 
@@ -614,6 +633,11 @@
       return openStatementKey;
     }
 
+    /** Checks if a statement already passed its cutoff date, so its total can no longer change. */
+    function isStatementClosed(statementKey) {
+      return getTodayDateString() > statementKey;
+    }
+
     /** Checks if a statement was due before the app was first used, so it is taken as already paid. */
     function isStatementPaidBeforeTracking(card, statementKey) {
       return getStatementDueDate(card, statementKey) < appData.settings.trackingStartDate;
@@ -810,19 +834,19 @@
       return Math.min(coveredAmount, totalAmount);
     }
 
-    /** Calculates what must be set aside in a week, grouped by card payment or fixed expense. The part paid with savings is not taken from the salary. */
+    /** Calculates what must be set aside in a week, grouped by card payment or fixed expense. The part paid with savings is not taken from the salary, and paid card statements ask for nothing. */
     function getWeekPlan(weekStart) {
       const groups = {};
 
       buildPaymentItems().forEach(function (item) {
-        if (item.isPaid) {
-          return;
-        }
         if (!groups[item.groupKey]) {
           groups[item.groupKey] = {
             groupKey: item.groupKey,
             label: item.groupLabel,
             groupType: item.groupType,
+            cardId: item.cardId,
+            statementKey: item.statementKey,
+            isPaid: item.isPaid,
             dueDate: item.dueDate,
             totalAmount: 0,
             fullWeeklyAmount: 0,
@@ -837,6 +861,9 @@
       const rows = Object.keys(groups).map(function (groupKey) {
         return groups[groupKey];
       }).filter(function (group) {
+        if (group.groupType === "card" && isStatementPaidBeforeTracking(findRecord(appData.cards, group.cardId), group.statementKey)) {
+          return false;
+        }
         return group.fullWeeklyAmount > 0.005;
       });
 
@@ -844,6 +871,9 @@
         row.coveredAmount = getSavingsCoverage(row.groupKey, row.totalAmount);
         const remainingAmount = row.totalAmount - row.coveredAmount;
         row.weeklyAmount = row.totalAmount > 0 ? row.fullWeeklyAmount * (remainingAmount / row.totalAmount) : 0;
+        if (row.isPaid) {
+          row.weeklyAmount = 0;
+        }
       });
 
       rows.sort(function (first, second) {
@@ -869,8 +899,8 @@
 
     // ---------- Monthly spending ----------
 
-    /** Returns the month total and totals by category; MSI purchases count only the payments due that month. */
-    function getMonthSpending(monthKey) {
+    /** Returns the month total and totals by category for the expenses that match a filter; MSI purchases count only the payments due that month. */
+    function getMonthSpending(monthKey, filterValue) {
       const totalsByCategory = {};
       let total = 0;
 
@@ -884,6 +914,9 @@
       }
 
       appData.expenses.forEach(function (expense) {
+        if (!matchesExpenseFilter(expense, filterValue)) {
+          return;
+        }
         if (expense.paymentMethod === "installments") {
           getInstallmentSchedule(expense).forEach(function (installment) {
             if (installment.dueDate.slice(0, 7) === monthKey) {
@@ -962,16 +995,7 @@
         html += '<div class="empty-state">No hay pagos que apartar esta semana.</div>';
       } else {
         plan.rows.forEach(function (row) {
-          const isDueSoon = row.dueDate <= addDaysToDateString(weekEnd, 7);
-          html += '<div class="row tappable" data-action="edit-coverage" data-id="' + escapeHtml(row.groupKey) + '">' +
-            '<div class="row-main">' +
-              '<div class="row-title">' + escapeHtml(row.label) + '</div>' +
-              '<div class="row-subtitle">Vence ' + escapeHtml(formatShortDate(row.dueDate)) + ' · total ' + formatMoney(row.totalAmount) +
-                (isDueSoon ? ' <span class="badge pending">Próximo</span>' : '') + '</div>' +
-              (row.coveredAmount > 0 ? '<div class="row-subtitle" style="color:var(--accent)">Con ahorro: ' + formatMoney(row.coveredAmount) + '</div>' : '') +
-            '</div>' +
-            '<div class="row-amount">' + formatMoney(row.weeklyAmount) + '</div>' +
-          '</div>';
+          html += renderWeekPaymentRow(row, weekEnd);
         });
       }
       html += '</div>';
@@ -1010,18 +1034,82 @@
       return html;
     }
 
+    /** Builds one payment row of the week; card payments show the no-interest total and a paid check. */
+    function renderWeekPaymentRow(row, weekEnd) {
+      const isDueSoon = row.dueDate <= addDaysToDateString(weekEnd, 7);
+      let checkHtml = "";
+      let statusHtml = isDueSoon ? ' <span class="badge pending">Próximo</span>' : '';
+      let totalLabel = "total";
+
+      if (row.groupType === "card") {
+        const isClosed = isStatementClosed(row.statementKey);
+        const canToggle = row.isPaid || isClosed;
+        totalLabel = "pago sin intereses";
+        checkHtml = '<button class="check-button' + (row.isPaid ? ' checked' : '') + '" data-action="toggle-statement" data-id="' + row.cardId + '" data-statement="' + row.statementKey + '"' + (canToggle ? '' : ' disabled') + '>' + (row.isPaid ? '✓' : '') + '</button>';
+        if (row.isPaid) {
+          statusHtml = ' <span class="badge paid">Pagado</span>';
+        } else if (!isClosed) {
+          statusHtml = ' <span class="badge">Aún no corta</span>';
+        }
+      }
+
+      return '<div class="row tappable" data-action="edit-coverage" data-id="' + escapeHtml(row.groupKey) + '">' +
+        checkHtml +
+        '<div class="row-main">' +
+          '<div class="row-title">' + escapeHtml(row.label) + '</div>' +
+          '<div class="row-subtitle">Vence ' + escapeHtml(formatShortDate(row.dueDate)) + ' · ' + totalLabel + ' ' + formatMoney(row.totalAmount) + statusHtml + '</div>' +
+          (row.coveredAmount > 0 ? '<div class="row-subtitle" style="color:var(--accent)">Con ahorro: ' + formatMoney(row.coveredAmount) + '</div>' : '') +
+        '</div>' +
+        '<div class="row-amount">' + formatMoney(row.weeklyAmount) + '</div>' +
+      '</div>';
+    }
+
+    /** Checks if an expense matches the selected filter of the expense log. */
+    function matchesExpenseFilter(expense, filterValue) {
+      if (filterValue === "all") {
+        return true;
+      }
+      if (filterValue === "cash" || filterValue === "debit") {
+        return expense.paymentMethod === filterValue;
+      }
+      const cardId = filterValue.replace("card:", "");
+      return (expense.paymentMethod === "card" || expense.paymentMethod === "installments") && expense.cardId === cardId;
+    }
+
+    /** Builds the filter buttons of the expense log: all, cash, debit and one per card. */
+    function renderExpenseFilters() {
+      const filters = [
+        { value: "all", label: "Todos" },
+        { value: "cash", label: "Efectivo" },
+        { value: "debit", label: "Débito" }
+      ];
+      appData.cards.forEach(function (card) {
+        filters.push({ value: "card:" + card.id, label: "💳 " + card.name });
+      });
+
+      let html = '<div class="filter-row">';
+      filters.forEach(function (filter) {
+        html += '<button class="filter-chip' + (filter.value === selectedExpenseFilter ? ' active' : '') + '" data-action="filter-expenses" data-id="' + escapeHtml(filter.value) + '">' + escapeHtml(filter.label) + '</button>';
+      });
+      return html + '</div>';
+    }
+
     /** Builds the expense log for the selected month, grouped by day. */
     function renderExpenses() {
-      const monthSpending = getMonthSpending(selectedMonth);
+      if (selectedExpenseFilter !== "all" && selectedExpenseFilter.indexOf("card:") === 0 && !findRecord(appData.cards, selectedExpenseFilter.replace("card:", ""))) {
+        selectedExpenseFilter = "all";
+      }
+
+      const monthSpending = getMonthSpending(selectedMonth, selectedExpenseFilter);
 
       const monthExpenses = appData.expenses.filter(function (expense) {
-        return expense.date.slice(0, 7) === selectedMonth;
+        return expense.date.slice(0, 7) === selectedMonth && matchesExpenseFilter(expense, selectedExpenseFilter);
       });
       monthExpenses.sort(function (first, second) {
         return second.date.localeCompare(first.date);
       });
 
-      let html = '<div class="card">' +
+      let html = renderExpenseFilters() + '<div class="card">' +
         '<div class="card-title">Total de ' + escapeHtml(formatMonth(selectedMonth)) + '</div>' +
         '<div class="big-number">' + formatMoney(monthSpending.total) + '</div>' +
         '<div class="row-subtitle">Las compras MSI cuentan solo con la mensualidad que vence este mes.</div>' +
@@ -1047,7 +1135,8 @@
       }
 
       if (monthExpenses.length === 0) {
-        return html + '<div class="card"><div class="empty-state">Toca + para registrar un gasto.</div></div>';
+        const emptyText = selectedExpenseFilter === "all" ? "Toca + para registrar un gasto." : "Sin gastos con este filtro este mes.";
+        return html + '<div class="card"><div class="empty-state">' + emptyText + '</div></div>';
       }
 
       html += '<div class="card" style="padding-top:4px">';
@@ -1103,9 +1192,10 @@
       }
 
       const paidBeforeTracking = isStatementPaidBeforeTracking(card, statementKey);
+      const canToggle = !paidBeforeTracking && (isPaid || isStatementClosed(statementKey));
 
       return '<div class="row">' +
-        '<button class="check-button' + (isPaid ? ' checked' : '') + '" data-action="toggle-statement" data-id="' + card.id + '" data-statement="' + statementKey + '"' + (paidBeforeTracking ? ' disabled' : '') + '>' + (isPaid ? '✓' : '') + '</button>' +
+        '<button class="check-button' + (isPaid ? ' checked' : '') + '" data-action="toggle-statement" data-id="' + card.id + '" data-statement="' + statementKey + '"' + (canToggle ? '' : ' disabled') + '>' + (isPaid ? '✓' : '') + '</button>' +
         '<div class="row-main">' +
           '<div class="row-title">' + title + '</div>' +
           '<div class="row-subtitle">Corte ' + escapeHtml(formatShortDate(statementKey)) + ' · pago ' + escapeHtml(formatShortDate(dueDate)) + ' ' + badge + '</div>' +
@@ -1914,6 +2004,9 @@
         openSheet("envelope", recordId);
       } else if (action === "edit-coverage") {
         openSheet("coverage", recordId);
+      } else if (action === "filter-expenses") {
+        selectedExpenseFilter = recordId;
+        render();
       } else if (action === "add-envelope") {
         openSheet("envelope");
       } else if (action === "edit-settings") {
