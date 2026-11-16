@@ -1,5 +1,5 @@
 // Change this version every time you upload changes so the phone gets the new files.
-const cacheName = "finanzas-v5";
+const cacheName = "finanzas-v6";
 
 const filesToCache = ["./", "./index.html", "./manifest.json", "./icon.png"];
 
