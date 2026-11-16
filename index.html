@@ -274,9 +274,32 @@
     .field label { font-size: 13px; color: var(--text-muted); font-weight: 600; }
     .field.hidden, .checkbox-field.hidden { display: none; }
 
-    .detail-list { margin: 0 0 6px 0; padding: 6px 12px; background: var(--surface-light); border-radius: 10px; }
-    .detail-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 5px 0; color: var(--text-muted); }
-    .detail-row span:last-child { color: var(--text); white-space: nowrap; }
+    .move-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .move-title { font-size: 18px; font-weight: 700; }
+    .move-amount { font-size: 22px; font-weight: 700; color: var(--accent); white-space: nowrap; text-align: right; }
+    .move-amount-label { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+
+    .summary-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .summary-chip { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 20px; background: var(--surface-light); color: var(--text-muted); }
+    .summary-chip strong { color: var(--text); }
+
+    .payment-block { margin-top: 14px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .payment-block-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface-light); }
+    .payment-block-title { font-size: 14px; font-weight: 700; }
+    .payment-block-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .payment-block-amount { font-size: 15px; font-weight: 700; white-space: nowrap; }
+
+    .breakdown-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .breakdown-table th { text-align: left; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 8px 12px 6px; }
+    .breakdown-table td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+    .breakdown-table .number-cell { text-align: right; white-space: nowrap; }
+    .breakdown-table th.number-cell { text-align: right; }
+    .breakdown-concept { font-weight: 600; }
+    .breakdown-note { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .type-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 6px; margin-right: 4px; vertical-align: 1px; }
+    .type-tag.purchase { background: rgba(245, 196, 81, 0.15); color: var(--warning); }
+    .type-tag.scheduled { background: rgba(122, 162, 255, 0.15); color: var(--card-color); }
+    .type-tag.pending { background: rgba(255, 107, 107, 0.15); color: var(--danger); }
 
     .field input, .field select {
       width: 100%;
@@ -384,7 +407,6 @@
     let sheetEditingId = null;
     let sheetCoverageTotal = 0;
     let selectedExpenseFilter = "all";
-    let expandedWeekGroups = {};
 
     // ---------- Storage ----------
 
@@ -959,6 +981,13 @@
       return summary.pendingRemainingAmount / (getDaysBetween(firstWeek, lastWeek) / 7 + 1);
     }
 
+    /** Returns which week of its saving period a week is, like "2 de 8". */
+    function getWeekProgressText(firstWeek, lastWeek, weekStart) {
+      const weekNumber = getDaysBetween(firstWeek, weekStart) / 7 + 1;
+      const numberOfWeeks = getDaysBetween(firstWeek, lastWeek) / 7 + 1;
+      return "Semana " + weekNumber + " de " + numberOfWeeks;
+    }
+
     /** Returns what must be moved to a card's envelope in a week for one statement, item by item. */
     function getStatementWeekDetails(summary, weekStart) {
       const details = [];
@@ -972,19 +1001,42 @@
         if (item.kind === "purchase") {
           const isThisWeek = item.startDate >= weekStart && item.startDate <= weekEnd;
           if (isThisWeek && item.startDate >= appData.settings.trackingStartDate) {
-            details.push({ label: item.label, amount: item.amount, isPurchase: true, isPending: false });
+            details.push({
+              label: item.label,
+              type: "purchase",
+              totalAmount: item.amount,
+              amount: item.amount,
+              note: "Compra del " + formatShortDate(item.startDate)
+            });
           }
         } else if (item.kind === "spread") {
           const share = getSpreadShare(item, weekStart);
           if (share > 0.005) {
-            details.push({ label: item.label + " → pago " + formatShortDate(item.dueDate), amount: share, isPurchase: false, isPending: false });
+            const itemWindow = getItemWindow(item);
+            details.push({
+              label: item.label,
+              type: "scheduled",
+              totalAmount: item.amount,
+              amount: share,
+              note: getWeekProgressText(itemWindow.firstWeek, itemWindow.lastWeek, weekStart)
+            });
           }
         }
       });
 
       const pendingShare = getPendingShare(summary, weekStart);
       if (pendingShare > 0.005) {
-        details.push({ label: "Pendiente de antes sin cubrir → pago " + formatShortDate(summary.dueDate), amount: pendingShare, isPurchase: false, isPending: true });
+        let lastWeek = getWeekStart(addDaysToDateString(summary.dueDate, -1));
+        if (lastWeek < getTrackingStartWeek()) {
+          lastWeek = getTrackingStartWeek();
+        }
+        details.push({
+          label: "Pendiente de antes sin cubrir",
+          type: "pending",
+          totalAmount: summary.pendingRemainingAmount,
+          amount: pendingShare,
+          note: getWeekProgressText(getTrackingStartWeek(), lastWeek, weekStart)
+        });
       }
 
       return details;
@@ -1031,23 +1083,34 @@
       const cardGroups = [];
 
       appData.cards.forEach(function (card) {
-        const group = { cardId: card.id, name: card.name, purchaseAmount: 0, scheduledAmount: 0, pendingAmount: 0, totalAmount: 0, details: [] };
+        const group = { cardId: card.id, name: card.name, purchaseAmount: 0, scheduledAmount: 0, pendingAmount: 0, totalAmount: 0, paymentBlocks: [] };
 
-        Object.keys(summaries).forEach(function (key) {
-          const summary = summaries[key];
-          if (summary.card.id !== card.id) {
+        const cardSummaries = Object.keys(summaries).map(function (key) {
+          return summaries[key];
+        }).filter(function (summary) {
+          return summary.card.id === card.id;
+        });
+        cardSummaries.sort(function (first, second) {
+          return first.dueDate.localeCompare(second.dueDate);
+        });
+
+        cardSummaries.forEach(function (summary) {
+          const details = getStatementWeekDetails(summary, weekStart);
+          if (details.length === 0) {
             return;
           }
-          getStatementWeekDetails(summary, weekStart).forEach(function (detail) {
-            if (detail.isPurchase) {
+          const paymentBlock = { dueDate: summary.dueDate, statementKey: summary.statementKey, statementTotal: summary.totalAmount, weekAmount: 0, rows: details };
+          details.forEach(function (detail) {
+            paymentBlock.weekAmount += detail.amount;
+            if (detail.type === "purchase") {
               group.purchaseAmount += detail.amount;
-            } else if (detail.isPending) {
+            } else if (detail.type === "pending") {
               group.pendingAmount += detail.amount;
             } else {
               group.scheduledAmount += detail.amount;
             }
-            group.details.push(detail);
           });
+          group.paymentBlocks.push(paymentBlock);
         });
 
         group.totalAmount = group.purchaseAmount + group.scheduledAmount + group.pendingAmount;
@@ -1056,7 +1119,7 @@
         }
       });
 
-      const cashGroup = { totalAmount: 0, details: [] };
+      const cashGroup = { totalAmount: 0, rows: [] };
       if (weekStart >= getTrackingStartWeek()) {
         paymentItems.forEach(function (item) {
           if (item.cardId) {
@@ -1064,8 +1127,19 @@
           }
           const share = getCashFixedShare(item, weekStart);
           if (share > 0.005) {
+            const itemWindow = getItemWindow(item);
+            let firstWeek = itemWindow.firstWeek;
+            if (firstWeek < getTrackingStartWeek()) {
+              firstWeek = getTrackingStartWeek();
+            }
             cashGroup.totalAmount += share;
-            cashGroup.details.push({ label: item.label + " (vence " + formatShortDate(item.dueDate) + ")", amount: share });
+            cashGroup.rows.push({
+              label: item.label,
+              type: "scheduled",
+              totalAmount: item.amount,
+              amount: share,
+              note: "Vence " + formatShortDate(item.dueDate) + " · " + getWeekProgressText(firstWeek, itemWindow.lastWeek < firstWeek ? firstWeek : itemWindow.lastWeek, weekStart)
+            });
           }
         });
       }
@@ -1225,31 +1299,17 @@
         (plan.freeAmount < 0 && plan.salary > 0 ? '<div class="warning-text">Te faltan ' + formatMoney(-plan.freeAmount) + '. Cúbrelo con tu ahorro tocando "Ahorro usado".</div>' : '') +
       '</div>';
 
-      html += '<div class="card" style="padding-bottom:4px"><div class="card-title">Mover a tus apartados</div>' +
-        '<p class="row-subtitle" style="margin-bottom:4px">Toca una tarjeta para ver qué incluye.</p>';
-
       if (plan.cardGroups.length === 0 && plan.cashGroup.totalAmount <= 0.005) {
-        html += '<div class="empty-state">Nada que mover esta semana.</div>';
+        html += '<div class="card"><div class="card-title">Mover a tus apartados</div><div class="empty-state">Nada que mover esta semana.</div></div>';
       }
 
       plan.cardGroups.forEach(function (group) {
-        const subtitleParts = [];
-        if (group.purchaseAmount > 0.005) {
-          subtitleParts.push("Compras " + formatMoney(group.purchaseAmount));
-        }
-        if (group.scheduledAmount > 0.005) {
-          subtitleParts.push("Fijos y MSI " + formatMoney(group.scheduledAmount));
-        }
-        if (group.pendingAmount > 0.005) {
-          subtitleParts.push("Pendiente " + formatMoney(group.pendingAmount));
-        }
-        html += renderWeekGroup(group.cardId, "💳 " + group.name, subtitleParts.join(" · "), group.totalAmount, group.details);
+        html += renderCardMoveCard(group);
       });
 
       if (plan.cashGroup.totalAmount > 0.005) {
-        html += renderWeekGroup("cash", "🏦 Débito / efectivo", "Fijos que no van a tarjeta", plan.cashGroup.totalAmount, plan.cashGroup.details);
+        html += renderCashMoveCard(plan.cashGroup);
       }
-      html += '</div>';
 
       html += '<div class="card"><div class="card-title">Apartados personales<button class="link-button" data-action="add-envelope">+ Agregar</button></div>';
       if (appData.envelopes.length === 0) {
@@ -1276,24 +1336,68 @@
       return html;
     }
 
-    /** Builds one expandable group of the week (a card envelope or the cash fixed expenses). */
-    function renderWeekGroup(groupId, title, subtitle, totalAmount, details) {
-      const isExpanded = expandedWeekGroups[groupId] === true;
-      let html = '<div class="row tappable" data-action="toggle-week-group" data-id="' + escapeHtml(groupId) + '">' +
-        '<div class="row-main"><div class="row-title">' + escapeHtml(title) + ' ' + (isExpanded ? '▾' : '▸') + '</div>' +
-        '<div class="row-subtitle">' + subtitle + '</div></div>' +
-        '<div class="row-amount">' + formatMoney(totalAmount) + '</div>' +
-      '</div>';
+    /** Builds the table rows of a breakdown: concept with its type and note, total and amount for this week. */
+    function renderBreakdownTable(rows) {
+      const typeLabels = { purchase: "Compra", scheduled: "Fijo/MSI", pending: "Pendiente" };
+      let html = '<table class="breakdown-table"><thead><tr><th>Concepto</th><th class="number-cell">Total</th><th class="number-cell">Semana</th></tr></thead><tbody>';
+      rows.forEach(function (row) {
+        html += '<tr>' +
+          '<td><div class="breakdown-concept"><span class="type-tag ' + row.type + '">' + typeLabels[row.type] + '</span>' + escapeHtml(row.label) + '</div>' +
+            '<div class="breakdown-note">' + escapeHtml(row.note) + '</div></td>' +
+          '<td class="number-cell">' + formatMoney(row.totalAmount) + '</td>' +
+          '<td class="number-cell"><strong>' + formatMoney(row.amount) + '</strong></td>' +
+        '</tr>';
+      });
+      return html + '</tbody></table>';
+    }
 
-      if (isExpanded) {
-        html += '<div class="detail-list">';
-        details.forEach(function (detail) {
-          html += '<div class="detail-row"><span>' + escapeHtml(detail.label) + '</span><span>' + formatMoney(detail.amount) + '</span></div>';
-        });
-        html += '</div>';
+    /** Builds the summary chips of a card: purchases, fixed and MSI, and pending. */
+    function renderSummaryChips(group) {
+      let html = '<div class="summary-chips">';
+      if (group.purchaseAmount > 0.005) {
+        html += '<span class="summary-chip">Compras <strong>' + formatMoney(group.purchaseAmount) + '</strong></span>';
       }
+      if (group.scheduledAmount > 0.005) {
+        html += '<span class="summary-chip">Fijos y MSI <strong>' + formatMoney(group.scheduledAmount) + '</strong></span>';
+      }
+      if (group.pendingAmount > 0.005) {
+        html += '<span class="summary-chip">Pendiente <strong>' + formatMoney(group.pendingAmount) + '</strong></span>';
+      }
+      return html + '</div>';
+    }
 
-      return html;
+    /** Builds the card of the week for one credit card: amount to move and a table per payment date. */
+    function renderCardMoveCard(group) {
+      let html = '<div class="card">' +
+        '<div class="move-header">' +
+          '<div><div class="move-title">💳 ' + escapeHtml(group.name) + '</div><div class="row-subtitle">Mover a su apartado esta semana</div></div>' +
+          '<div><div class="move-amount-label">Mover</div><div class="move-amount">' + formatMoney(group.totalAmount) + '</div></div>' +
+        '</div>' +
+        renderSummaryChips(group);
+
+      group.paymentBlocks.forEach(function (paymentBlock) {
+        html += '<div class="payment-block">' +
+          '<div class="payment-block-header">' +
+            '<div><div class="payment-block-title">Pago del ' + escapeHtml(formatShortDate(paymentBlock.dueDate)) + '</div>' +
+            '<div class="payment-block-subtitle">Corte ' + escapeHtml(formatShortDate(paymentBlock.statementKey)) + ' · sin intereses ' + formatMoney(paymentBlock.statementTotal) + '</div></div>' +
+            '<div class="payment-block-amount">' + formatMoney(paymentBlock.weekAmount) + '</div>' +
+          '</div>' +
+          renderBreakdownTable(paymentBlock.rows) +
+        '</div>';
+      });
+
+      return html + '</div>';
+    }
+
+    /** Builds the card of the week for the fixed expenses paid with cash or debit. */
+    function renderCashMoveCard(cashGroup) {
+      return '<div class="card">' +
+        '<div class="move-header">' +
+          '<div><div class="move-title">🏦 Débito / efectivo</div><div class="row-subtitle">Fijos que no van a tarjeta</div></div>' +
+          '<div><div class="move-amount-label">Apartar</div><div class="move-amount">' + formatMoney(cashGroup.totalAmount) + '</div></div>' +
+        '</div>' +
+        '<div class="payment-block">' + renderBreakdownTable(cashGroup.rows) + '</div>' +
+      '</div>';
     }
 
     /** Checks if an expense matches the selected filter of the expense log. */
@@ -2259,9 +2363,6 @@
         openSheet("pending", recordId);
       } else if (action === "edit-week-savings") {
         openSheet("weekSavings");
-      } else if (action === "toggle-week-group") {
-        expandedWeekGroups[recordId] = !expandedWeekGroups[recordId];
-        render();
       } else if (action === "filter-expenses") {
         selectedExpenseFilter = recordId;
         render();
