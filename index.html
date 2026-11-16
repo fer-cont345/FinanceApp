@@ -272,7 +272,11 @@
 
     .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
     .field label { font-size: 13px; color: var(--text-muted); font-weight: 600; }
-    .field.hidden { display: none; }
+    .field.hidden, .checkbox-field.hidden { display: none; }
+
+    .detail-list { margin: 0 0 6px 0; padding: 6px 12px; background: var(--surface-light); border-radius: 10px; }
+    .detail-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 5px 0; color: var(--text-muted); }
+    .detail-row span:last-child { color: var(--text); white-space: nowrap; }
 
     .field input, .field select {
       width: 100%;
@@ -380,6 +384,7 @@
     let sheetEditingId = null;
     let sheetCoverageTotal = 0;
     let selectedExpenseFilter = "all";
+    let expandedWeekGroups = {};
 
     // ---------- Storage ----------
 
@@ -717,23 +722,42 @@
       }) || null;
     }
 
-    // ---------- Payment items and weekly plan ----------
-    // A payment item is something that must be paid on a due date and is saved for week by week.
+    // ---------- Payment items ----------
+    // A payment item is something that must be paid on a due date.
+    // kind "purchase": a normal card purchase, moved complete to the card's envelope in the week it is made.
+    // kind "spread": fixed expenses, MSI payments and purchases marked to spread; saved little by little until the due date.
+    // kind "initial": the balance a card had when the app started being used.
 
     /** Creates a payment item that belongs to a credit card statement. */
-    function createCardItem(card, statementKey, label, amount, startDate) {
+    function createCardItem(card, statementKey, label, amount, startDate, kind) {
       return {
         groupKey: "card-" + card.id + "-" + statementKey,
-        groupLabel: "💳 " + card.name,
-        groupType: "card",
         cardId: card.id,
         statementKey: statementKey,
         label: label,
         amount: amount,
         startDate: startDate,
         dueDate: getStatementDueDate(card, statementKey),
+        kind: kind,
         isPaid: isStatementPaid(card, statementKey)
       };
+    }
+
+    /** Returns the date of the charge before a given charge of a fixed expense. */
+    function getPreviousChargeDate(fixedExpense, occurrenceDate) {
+      const frequencyWeeks = Number(fixedExpense.frequencyWeeks) || 0;
+      if (frequencyWeeks > 0) {
+        return addDaysToDateString(occurrenceDate, -frequencyWeeks * 7);
+      }
+      return addMonthsToDateString(occurrenceDate, -Number(fixedExpense.frequencyMonths));
+    }
+
+    /** Returns the date from which a fixed expense charge starts being saved: a weekly charge in its own week, longer ones since the previous charge. */
+    function getFixedSavingStartDate(fixedExpense, occurrenceDate) {
+      if (Number(fixedExpense.frequencyWeeks) === 1) {
+        return occurrenceDate;
+      }
+      return getPreviousChargeDate(fixedExpense, occurrenceDate);
     }
 
     /** Builds every payment item from cards, the expense log and fixed expenses. */
@@ -742,25 +766,32 @@
 
       appData.cards.forEach(function (card) {
         if (Number(card.initialBalance) > 0 && card.initialBalanceStatementKey) {
-          items.push(createCardItem(card, card.initialBalanceStatementKey, "Saldo inicial", Number(card.initialBalance), card.createdDate));
+          items.push(createCardItem(card, card.initialBalanceStatementKey, "Saldo inicial", Number(card.initialBalance), card.createdDate, "initial"));
         }
       });
 
       appData.expenses.forEach(function (expense) {
+        const card = findRecord(appData.cards, expense.cardId);
+        if (!card) {
+          return;
+        }
+
         if (expense.paymentMethod === "card") {
-          const card = findRecord(appData.cards, expense.cardId);
-          if (card) {
-            const statementKey = getStatementKeyForDate(card, expense.date);
-            items.push(createCardItem(card, statementKey, expense.description, Number(expense.amount), expense.date));
+          const statementKey = getStatementKeyForDate(card, expense.date);
+          const fixedExpense = findRecord(appData.fixedExpenses, expense.fixedExpenseId);
+          if (fixedExpense) {
+            const startDate = getFixedSavingStartDate(fixedExpense, expense.occurrenceDate || expense.date);
+            items.push(createCardItem(card, statementKey, expense.description, Number(expense.amount), startDate, "spread"));
+          } else if (expense.spreadUntilDue) {
+            items.push(createCardItem(card, statementKey, expense.description + " (repartido)", Number(expense.amount), expense.date, "spread"));
+          } else {
+            items.push(createCardItem(card, statementKey, expense.description, Number(expense.amount), expense.date, "purchase"));
           }
         } else if (expense.paymentMethod === "installments") {
-          const card = findRecord(appData.cards, expense.cardId);
-          if (card) {
-            getInstallmentSchedule(expense).forEach(function (installment) {
-              const label = expense.description + " (" + installment.number + "/" + expense.months + ")";
-              items.push(createCardItem(card, installment.statementKey, label, installment.amount, installment.startDate));
-            });
-          }
+          getInstallmentSchedule(expense).forEach(function (installment) {
+            const label = expense.description + " (" + installment.number + "/" + expense.months + ")";
+            items.push(createCardItem(card, installment.statementKey, label, installment.amount, installment.startDate, "spread"));
+          });
         }
       });
 
@@ -774,24 +805,24 @@
             return;
           }
 
-          // A weekly charge is set aside entirely in the week it happens; longer ones are spread since the previous charge.
-          const startDate = Number(fixedExpense.frequencyWeeks) === 1 ? occurrence.date : occurrence.previousDate;
+          const startDate = getFixedSavingStartDate(fixedExpense, occurrence.date);
 
           if (fixedExpense.paymentMethod === "card") {
             const card = findRecord(appData.cards, fixedExpense.cardId);
             if (card) {
               const statementKey = getStatementKeyForDate(card, occurrence.date);
-              items.push(createCardItem(card, statementKey, fixedExpense.name, Number(fixedExpense.amount), startDate));
+              items.push(createCardItem(card, statementKey, fixedExpense.name, Number(fixedExpense.amount), startDate, "spread"));
             }
           } else {
             items.push({
               groupKey: "fixed-" + fixedExpense.id + "-" + occurrence.date,
-              groupLabel: "📌 " + fixedExpense.name,
-              groupType: "fixed",
+              cardId: null,
+              statementKey: null,
               label: fixedExpense.name,
               amount: Number(fixedExpense.amount),
               startDate: startDate,
               dueDate: occurrence.date,
+              kind: "spread",
               isPaid: false
             });
           }
@@ -801,23 +832,187 @@
       return items;
     }
 
-    /** Returns how much of an item must be saved in a week, splitting it across the paydays before its due date. Weeks before the app was first used are skipped. */
-    function getWeeklyShare(item, weekStart) {
-      let firstWeek = getWeekStart(item.startDate);
-      const trackingStartWeek = getWeekStart(appData.settings.trackingStartDate);
+    // ---------- Spreading amounts across weeks ----------
+
+    /** Returns the payday week when the app started being used. */
+    function getTrackingStartWeek() {
+      return getWeekStart(appData.settings.trackingStartDate);
+    }
+
+    /** Returns the first and last week an item is saved for, and how many weeks that is. */
+    function getItemWindow(item) {
+      const firstWeek = getWeekStart(item.startDate);
+      let lastWeek = getWeekStart(addDaysToDateString(item.dueDate, -1));
+      if (lastWeek < firstWeek) {
+        lastWeek = firstWeek;
+      }
+      return {
+        firstWeek: firstWeek,
+        lastWeek: lastWeek,
+        numberOfWeeks: getDaysBetween(firstWeek, lastWeek) / 7 + 1
+      };
+    }
+
+    /** Returns the part of a spread item that belongs to a week. */
+    function getSpreadShare(item, weekStart) {
+      const itemWindow = getItemWindow(item);
+      if (weekStart < itemWindow.firstWeek || weekStart > itemWindow.lastWeek) {
+        return 0;
+      }
+      return item.amount / itemWindow.numberOfWeeks;
+    }
+
+    /** Returns the part of a cash or debit fixed expense for a week; weeks before the app was used are skipped so the full amount is still asked. */
+    function getCashFixedShare(item, weekStart) {
+      const itemWindow = getItemWindow(item);
+      const trackingStartWeek = getTrackingStartWeek();
+      let firstWeek = itemWindow.firstWeek;
       if (firstWeek < trackingStartWeek) {
         firstWeek = trackingStartWeek;
       }
-      let lastWeek = getWeekStart(addDaysToDateString(item.dueDate, -1));
+      let lastWeek = itemWindow.lastWeek;
       if (lastWeek < firstWeek) {
         lastWeek = firstWeek;
       }
       if (weekStart < firstWeek || weekStart > lastWeek) {
         return 0;
       }
-      const numberOfWeeks = getDaysBetween(firstWeek, lastWeek) / 7 + 1;
-      return item.amount / numberOfWeeks;
+      return item.amount / (getDaysBetween(firstWeek, lastWeek) / 7 + 1);
     }
+
+    /** Returns the part of a card item that should already have been set aside before the app was used. */
+    function getPartBeforeTracking(item) {
+      if (item.kind === "initial") {
+        return item.amount;
+      }
+      if (item.kind === "purchase") {
+        return item.startDate < appData.settings.trackingStartDate ? item.amount : 0;
+      }
+
+      const itemWindow = getItemWindow(item);
+      const trackingStartWeek = getTrackingStartWeek();
+      if (itemWindow.firstWeek >= trackingStartWeek) {
+        return 0;
+      }
+      let weeksBefore = getDaysBetween(itemWindow.firstWeek, trackingStartWeek) / 7;
+      if (weeksBefore > itemWindow.numberOfWeeks) {
+        weeksBefore = itemWindow.numberOfWeeks;
+      }
+      return (item.amount / itemWindow.numberOfWeeks) * weeksBefore;
+    }
+
+    // ---------- Card statements summary ----------
+
+    /** Groups the card items by statement and calculates the amount pending from before the app was used. */
+    function buildStatementSummaries(paymentItems) {
+      const summaries = {};
+
+      paymentItems.forEach(function (item) {
+        if (!item.cardId) {
+          return;
+        }
+        if (!summaries[item.groupKey]) {
+          const card = findRecord(appData.cards, item.cardId);
+          summaries[item.groupKey] = {
+            key: item.groupKey,
+            card: card,
+            statementKey: item.statementKey,
+            dueDate: item.dueDate,
+            isPaid: item.isPaid,
+            totalAmount: 0,
+            pendingBeforeAmount: 0,
+            items: []
+          };
+        }
+        const summary = summaries[item.groupKey];
+        summary.totalAmount += item.amount;
+        summary.pendingBeforeAmount += getPartBeforeTracking(item);
+        summary.items.push(item);
+      });
+
+      Object.keys(summaries).forEach(function (key) {
+        const summary = summaries[key];
+        if (summary.pendingBeforeAmount < 0.005) {
+          summary.pendingBeforeAmount = 0;
+        }
+        const coveredAmount = Number(appData.savingsCoverages["pending-" + key]) || 0;
+        summary.pendingCoveredAmount = Math.min(coveredAmount, summary.pendingBeforeAmount);
+        summary.pendingRemainingAmount = summary.pendingBeforeAmount - summary.pendingCoveredAmount;
+      });
+
+      return summaries;
+    }
+
+    /** Returns the weekly part of the pending amount that is not covered, spread from the first week of use until the due date. */
+    function getPendingShare(summary, weekStart) {
+      if (summary.pendingRemainingAmount <= 0.005) {
+        return 0;
+      }
+      const firstWeek = getTrackingStartWeek();
+      let lastWeek = getWeekStart(addDaysToDateString(summary.dueDate, -1));
+      if (lastWeek < firstWeek) {
+        lastWeek = firstWeek;
+      }
+      if (weekStart < firstWeek || weekStart > lastWeek) {
+        return 0;
+      }
+      return summary.pendingRemainingAmount / (getDaysBetween(firstWeek, lastWeek) / 7 + 1);
+    }
+
+    /** Returns what must be moved to a card's envelope in a week for one statement, item by item. */
+    function getStatementWeekDetails(summary, weekStart) {
+      const details = [];
+      if (summary.isPaid || weekStart < getTrackingStartWeek()) {
+        return details;
+      }
+
+      const weekEnd = addDaysToDateString(weekStart, 6);
+
+      summary.items.forEach(function (item) {
+        if (item.kind === "purchase") {
+          const isThisWeek = item.startDate >= weekStart && item.startDate <= weekEnd;
+          if (isThisWeek && item.startDate >= appData.settings.trackingStartDate) {
+            details.push({ label: item.label, amount: item.amount, isPurchase: true, isPending: false });
+          }
+        } else if (item.kind === "spread") {
+          const share = getSpreadShare(item, weekStart);
+          if (share > 0.005) {
+            details.push({ label: item.label + " → pago " + formatShortDate(item.dueDate), amount: share, isPurchase: false, isPending: false });
+          }
+        }
+      });
+
+      const pendingShare = getPendingShare(summary, weekStart);
+      if (pendingShare > 0.005) {
+        details.push({ label: "Pendiente de antes sin cubrir → pago " + formatShortDate(summary.dueDate), amount: pendingShare, isPurchase: false, isPending: true });
+      }
+
+      return details;
+    }
+
+    /** Returns how much a card's envelope should have today for its unpaid statements. */
+    function getExpectedEnvelopeBalance(card, summaries) {
+      const currentWeek = getWeekStart(getTodayDateString());
+      const trackingStartWeek = getTrackingStartWeek();
+      let total = 0;
+
+      Object.keys(summaries).forEach(function (key) {
+        const summary = summaries[key];
+        if (summary.card.id !== card.id || summary.isPaid) {
+          return;
+        }
+        total += summary.pendingCoveredAmount;
+        for (let weekStart = trackingStartWeek; weekStart <= currentWeek; weekStart = addDaysToDateString(weekStart, 7)) {
+          getStatementWeekDetails(summary, weekStart).forEach(function (detail) {
+            total += detail.amount;
+          });
+        }
+      });
+
+      return total;
+    }
+
+    // ---------- Weekly plan ----------
 
     /** Returns the sum of the weekly amounts of all envelopes. */
     function getEnvelopeTotal() {
@@ -828,72 +1023,107 @@
       return total;
     }
 
-    /** Returns how much of a payment group is paid with savings, never more than its total. */
-    function getSavingsCoverage(groupKey, totalAmount) {
-      const coveredAmount = Number(appData.savingsCoverages[groupKey]) || 0;
-      return Math.min(coveredAmount, totalAmount);
-    }
-
-    /** Calculates what must be set aside in a week, grouped by card payment or fixed expense. The part paid with savings is not taken from the salary, and paid card statements ask for nothing. */
+    /** Calculates what to move to each card envelope, what to set aside for cash fixed expenses and what is free in a week. */
     function getWeekPlan(weekStart) {
-      const groups = {};
+      const paymentItems = buildPaymentItems();
+      const summaries = buildStatementSummaries(paymentItems);
+      const weekEnd = addDaysToDateString(weekStart, 6);
+      const cardGroups = [];
 
-      buildPaymentItems().forEach(function (item) {
-        if (!groups[item.groupKey]) {
-          groups[item.groupKey] = {
-            groupKey: item.groupKey,
-            label: item.groupLabel,
-            groupType: item.groupType,
-            cardId: item.cardId,
-            statementKey: item.statementKey,
-            isPaid: item.isPaid,
-            dueDate: item.dueDate,
-            totalAmount: 0,
-            fullWeeklyAmount: 0,
-            coveredAmount: 0,
-            weeklyAmount: 0
-          };
-        }
-        groups[item.groupKey].totalAmount += item.amount;
-        groups[item.groupKey].fullWeeklyAmount += getWeeklyShare(item, weekStart);
-      });
+      appData.cards.forEach(function (card) {
+        const group = { cardId: card.id, name: card.name, purchaseAmount: 0, scheduledAmount: 0, pendingAmount: 0, totalAmount: 0, details: [] };
 
-      const rows = Object.keys(groups).map(function (groupKey) {
-        return groups[groupKey];
-      }).filter(function (group) {
-        if (group.groupType === "card" && isStatementPaidBeforeTracking(findRecord(appData.cards, group.cardId), group.statementKey)) {
-          return false;
-        }
-        return group.fullWeeklyAmount > 0.005;
-      });
+        Object.keys(summaries).forEach(function (key) {
+          const summary = summaries[key];
+          if (summary.card.id !== card.id) {
+            return;
+          }
+          getStatementWeekDetails(summary, weekStart).forEach(function (detail) {
+            if (detail.isPurchase) {
+              group.purchaseAmount += detail.amount;
+            } else if (detail.isPending) {
+              group.pendingAmount += detail.amount;
+            } else {
+              group.scheduledAmount += detail.amount;
+            }
+            group.details.push(detail);
+          });
+        });
 
-      rows.forEach(function (row) {
-        row.coveredAmount = getSavingsCoverage(row.groupKey, row.totalAmount);
-        const remainingAmount = row.totalAmount - row.coveredAmount;
-        row.weeklyAmount = row.totalAmount > 0 ? row.fullWeeklyAmount * (remainingAmount / row.totalAmount) : 0;
-        if (row.isPaid) {
-          row.weeklyAmount = 0;
+        group.totalAmount = group.purchaseAmount + group.scheduledAmount + group.pendingAmount;
+        if (group.totalAmount > 0.005) {
+          cardGroups.push(group);
         }
       });
 
-      rows.sort(function (first, second) {
-        return first.dueDate.localeCompare(second.dueDate);
+      const cashGroup = { totalAmount: 0, details: [] };
+      if (weekStart >= getTrackingStartWeek()) {
+        paymentItems.forEach(function (item) {
+          if (item.cardId) {
+            return;
+          }
+          const share = getCashFixedShare(item, weekStart);
+          if (share > 0.005) {
+            cashGroup.totalAmount += share;
+            cashGroup.details.push({ label: item.label + " (vence " + formatShortDate(item.dueDate) + ")", amount: share });
+          }
+        });
+      }
+
+      let cashSpent = 0;
+      const spendingByCategory = {};
+      appData.expenses.forEach(function (expense) {
+        if (expense.date < weekStart || expense.date > weekEnd || expense.fixedExpenseId) {
+          return;
+        }
+        const isCash = expense.paymentMethod === "cash" || expense.paymentMethod === "debit";
+        const isCardPurchase = expense.paymentMethod === "card" && !expense.spreadUntilDue && expense.date >= appData.settings.trackingStartDate;
+        if (isCash) {
+          cashSpent += Number(expense.amount);
+        }
+        if (isCash || isCardPurchase) {
+          if (!spendingByCategory[expense.category]) {
+            spendingByCategory[expense.category] = 0;
+          }
+          spendingByCategory[expense.category] += Number(expense.amount);
+        }
       });
 
-      let paymentTotal = 0;
-      rows.forEach(function (row) {
-        paymentTotal += row.weeklyAmount;
+      let purchaseTotal = 0;
+      let scheduledTotal = cashGroup.totalAmount;
+      cardGroups.forEach(function (group) {
+        purchaseTotal += group.purchaseAmount;
+        scheduledTotal += group.scheduledAmount + group.pendingAmount;
       });
 
-      const envelopeTotal = getEnvelopeTotal();
+      const envelopeUsage = {};
+      let coveredByEnvelopes = 0;
+      appData.envelopes.forEach(function (envelope) {
+        let usedAmount = 0;
+        if (envelope.category && spendingByCategory[envelope.category]) {
+          usedAmount = Math.min(Number(envelope.weeklyAmount), spendingByCategory[envelope.category]);
+          spendingByCategory[envelope.category] -= usedAmount;
+        }
+        envelopeUsage[envelope.id] = usedAmount;
+        coveredByEnvelopes += usedAmount;
+      });
+
       const salary = Number(appData.settings.weeklySalary) || 0;
+      const envelopeTotal = getEnvelopeTotal();
+      const savingsUsed = Number(appData.savingsCoverages["week-" + weekStart]) || 0;
+      const spendingOutsideEnvelopes = cashSpent + purchaseTotal - coveredByEnvelopes;
 
       return {
-        rows: rows,
-        paymentTotal: paymentTotal,
+        cardGroups: cardGroups,
+        cashGroup: cashGroup,
+        scheduledTotal: scheduledTotal,
+        purchaseTotal: purchaseTotal,
+        cashSpent: cashSpent,
         envelopeTotal: envelopeTotal,
+        envelopeUsage: envelopeUsage,
+        savingsUsed: savingsUsed,
         salary: salary,
-        freeAmount: salary - paymentTotal - envelopeTotal
+        freeAmount: salary - scheduledTotal - envelopeTotal - spendingOutsideEnvelopes + savingsUsed
       };
     }
 
@@ -959,7 +1189,7 @@
       }
     }
 
-    /** Builds the weekly set-aside screen. */
+    /** Builds the weekly screen: what to move to each envelope, what is free and what was spent. */
     function renderWeek() {
       const weekEnd = addDaysToDateString(selectedWeekStart, 6);
       const currentWeekStart = getWeekStart(getTodayDateString());
@@ -978,25 +1208,46 @@
           '<button class="primary-button" data-action="edit-settings">Configurar sueldo</button></div></div>';
       }
 
+      if (selectedWeekStart < getTrackingStartWeek()) {
+        html += '<div class="card"><div class="empty-state">Esta semana es de antes de que empezaras a usar la app.</div></div>';
+      }
+
       html += '<div class="card">' +
         '<div class="card-title">Libre esta semana</div>' +
         '<div class="big-number" style="color:' + (plan.freeAmount < 0 ? 'var(--danger)' : 'var(--text)') + '">' + formatMoney(plan.freeAmount) + '</div>' +
         '<div class="stat-grid">' +
           '<div><div class="stat-label">Sueldo</div><div class="stat-value">' + formatMoney(plan.salary) + '</div></div>' +
-          '<div><div class="stat-label">Pagos</div><div class="stat-value" style="color:var(--card-color)">' + formatMoney(plan.paymentTotal) + '</div></div>' +
-          '<div><div class="stat-label">Apartados</div><div class="stat-value" style="color:var(--envelope-color)">' + formatMoney(plan.envelopeTotal) + '</div></div>' +
+          '<div><div class="stat-label">Por apartar</div><div class="stat-value" style="color:var(--card-color)">' + formatMoney(plan.scheduledTotal) + '</div></div>' +
+          '<div><div class="stat-label">Gastado</div><div class="stat-value" style="color:var(--warning)">' + formatMoney(plan.purchaseTotal + plan.cashSpent) + '</div></div>' +
         '</div>' +
-        (plan.freeAmount < 0 && plan.salary > 0 ? '<div class="warning-text">Esta semana te faltan ' + formatMoney(-plan.freeAmount) + '.</div>' : '') +
+        '<div class="row" style="padding-bottom:0;margin-top:8px"><div class="row-main row-subtitle">Apartados personales</div><div class="row-amount" style="color:var(--envelope-color)">' + formatMoney(plan.envelopeTotal) + '</div></div>' +
+        '<div class="row tappable" data-action="edit-week-savings" style="padding-bottom:0"><div class="row-main row-subtitle">Ahorro usado esta semana (tocar)</div><div class="row-amount" style="color:var(--accent)">' + formatMoney(plan.savingsUsed) + '</div></div>' +
+        (plan.freeAmount < 0 && plan.salary > 0 ? '<div class="warning-text">Te faltan ' + formatMoney(-plan.freeAmount) + '. Cúbrelo con tu ahorro tocando "Ahorro usado".</div>' : '') +
       '</div>';
 
-      html += '<div class="card"><div class="card-title">Apartar para pagos</div>' +
-        '<p class="row-subtitle" style="margin-bottom:4px">Toca un pago para cubrir una parte con tu ahorro.</p>';
-      if (plan.rows.length === 0) {
-        html += '<div class="empty-state">No hay pagos que apartar esta semana.</div>';
-      } else {
-        plan.rows.forEach(function (row) {
-          html += renderWeekPaymentRow(row, weekEnd);
-        });
+      html += '<div class="card" style="padding-bottom:4px"><div class="card-title">Mover a tus apartados</div>' +
+        '<p class="row-subtitle" style="margin-bottom:4px">Toca una tarjeta para ver qué incluye.</p>';
+
+      if (plan.cardGroups.length === 0 && plan.cashGroup.totalAmount <= 0.005) {
+        html += '<div class="empty-state">Nada que mover esta semana.</div>';
+      }
+
+      plan.cardGroups.forEach(function (group) {
+        const subtitleParts = [];
+        if (group.purchaseAmount > 0.005) {
+          subtitleParts.push("Compras " + formatMoney(group.purchaseAmount));
+        }
+        if (group.scheduledAmount > 0.005) {
+          subtitleParts.push("Fijos y MSI " + formatMoney(group.scheduledAmount));
+        }
+        if (group.pendingAmount > 0.005) {
+          subtitleParts.push("Pendiente " + formatMoney(group.pendingAmount));
+        }
+        html += renderWeekGroup(group.cardId, "💳 " + group.name, subtitleParts.join(" · "), group.totalAmount, group.details);
+      });
+
+      if (plan.cashGroup.totalAmount > 0.005) {
+        html += renderWeekGroup("cash", "🏦 Débito / efectivo", "Fijos que no van a tarjeta", plan.cashGroup.totalAmount, plan.cashGroup.details);
       }
       html += '</div>';
 
@@ -1005,63 +1256,44 @@
         html += '<div class="empty-state">Agrega apartados como comida, ahorro o salidas.</div>';
       } else {
         appData.envelopes.forEach(function (envelope) {
+          const usedAmount = plan.envelopeUsage[envelope.id] || 0;
+          const subtitle = envelope.category
+            ? 'Para ' + escapeHtml(envelope.category) + ' · usado ' + formatMoney(usedAmount)
+            : 'Sin categoría (ahorro o meta)';
           html += '<div class="row tappable" data-action="edit-envelope" data-id="' + envelope.id + '">' +
-            '<div class="row-main"><div class="row-title">' + escapeHtml(envelope.name) + '</div></div>' +
+            '<div class="row-main"><div class="row-title">' + escapeHtml(envelope.name) + '</div><div class="row-subtitle">' + subtitle + '</div></div>' +
             '<div class="row-amount">' + formatMoney(envelope.weeklyAmount) + '</div>' +
           '</div>';
         });
       }
       html += '</div>';
 
-      let cashSpent = 0;
-      let cardSpent = 0;
-      appData.expenses.forEach(function (expense) {
-        if (expense.date < selectedWeekStart || expense.date > weekEnd || expense.fixedExpenseId) {
-          return;
-        }
-        if (expense.paymentMethod === "cash" || expense.paymentMethod === "debit") {
-          cashSpent += Number(expense.amount);
-        } else if (expense.paymentMethod === "card") {
-          cardSpent += Number(expense.amount);
-        }
-      });
-
       html += '<div class="card"><div class="card-title">Gastado esta semana</div>' +
-        '<div class="row"><div class="row-main">Efectivo / débito</div><div class="row-amount">' + formatMoney(cashSpent) + '</div></div>' +
-        '<div class="row"><div class="row-main">Tarjeta (sin MSI)</div><div class="row-amount">' + formatMoney(cardSpent) + '</div></div>' +
+        '<div class="row"><div class="row-main">Efectivo / débito</div><div class="row-amount">' + formatMoney(plan.cashSpent) + '</div></div>' +
+        '<div class="row"><div class="row-main">Tarjeta (compras normales)</div><div class="row-amount">' + formatMoney(plan.purchaseTotal) + '</div></div>' +
       '</div>';
 
       return html;
     }
 
-    /** Builds one payment row of the week; card payments show the no-interest total and a paid check. */
-    function renderWeekPaymentRow(row, weekEnd) {
-      const isDueSoon = row.dueDate <= addDaysToDateString(weekEnd, 7);
-      let checkHtml = "";
-      let statusHtml = isDueSoon ? ' <span class="badge pending">Próximo</span>' : '';
-      let totalLabel = "total";
+    /** Builds one expandable group of the week (a card envelope or the cash fixed expenses). */
+    function renderWeekGroup(groupId, title, subtitle, totalAmount, details) {
+      const isExpanded = expandedWeekGroups[groupId] === true;
+      let html = '<div class="row tappable" data-action="toggle-week-group" data-id="' + escapeHtml(groupId) + '">' +
+        '<div class="row-main"><div class="row-title">' + escapeHtml(title) + ' ' + (isExpanded ? '▾' : '▸') + '</div>' +
+        '<div class="row-subtitle">' + subtitle + '</div></div>' +
+        '<div class="row-amount">' + formatMoney(totalAmount) + '</div>' +
+      '</div>';
 
-      if (row.groupType === "card") {
-        const isClosed = isStatementClosed(row.statementKey);
-        const canToggle = row.isPaid || isClosed;
-        totalLabel = "pago sin intereses";
-        checkHtml = '<button class="check-button' + (row.isPaid ? ' checked' : '') + '" data-action="toggle-statement" data-id="' + row.cardId + '" data-statement="' + row.statementKey + '"' + (canToggle ? '' : ' disabled') + '>' + (row.isPaid ? '✓' : '') + '</button>';
-        if (row.isPaid) {
-          statusHtml = ' <span class="badge paid">Pagado</span>';
-        } else if (!isClosed) {
-          statusHtml = ' <span class="badge">Aún no corta</span>';
-        }
+      if (isExpanded) {
+        html += '<div class="detail-list">';
+        details.forEach(function (detail) {
+          html += '<div class="detail-row"><span>' + escapeHtml(detail.label) + '</span><span>' + formatMoney(detail.amount) + '</span></div>';
+        });
+        html += '</div>';
       }
 
-      return '<div class="row tappable" data-action="edit-coverage" data-id="' + escapeHtml(row.groupKey) + '">' +
-        checkHtml +
-        '<div class="row-main">' +
-          '<div class="row-title">' + escapeHtml(row.label) + '</div>' +
-          '<div class="row-subtitle">Vence ' + escapeHtml(formatShortDate(row.dueDate)) + ' · ' + totalLabel + ' ' + formatMoney(row.totalAmount) + statusHtml + '</div>' +
-          (row.coveredAmount > 0 ? '<div class="row-subtitle" style="color:var(--accent)">Con ahorro: ' + formatMoney(row.coveredAmount) + '</div>' : '') +
-        '</div>' +
-        '<div class="row-amount">' + formatMoney(row.weeklyAmount) + '</div>' +
-      '</div>';
+      return html;
     }
 
     /** Checks if an expense matches the selected filter of the expense log. */
@@ -1152,6 +1384,9 @@
         if (expense.paymentMethod === "installments") {
           subtitle += ' · ' + expense.months + ' de ' + formatMoney(Number(expense.amount) / Number(expense.months));
         }
+        if (expense.spreadUntilDue) {
+          subtitle += ' · repartido';
+        }
         if (expense.fixedExpenseId) {
           subtitle = '📌 ' + subtitle;
         }
@@ -1166,27 +1401,18 @@
       return html + '</div>';
     }
 
-    /** Returns the total of a card statement from a list of payment items. */
-    function getStatementTotal(paymentItems, cardId, statementKey) {
-      let total = 0;
-      paymentItems.forEach(function (item) {
-        if (item.cardId === cardId && item.statementKey === statementKey) {
-          total += item.amount;
-        }
-      });
-      return total;
-    }
-
-    /** Builds one statement row with its paid check. */
-    function renderStatementRow(card, statementKey, title, total) {
+    /** Builds one statement row: total to pay, paid check and the amount pending from before the app was used. */
+    function renderStatementRow(card, statementKey, title, summary) {
       const today = getTodayDateString();
       const dueDate = getStatementDueDate(card, statementKey);
       const isPaid = isStatementPaid(card, statementKey);
+      const total = summary ? summary.totalAmount : 0;
 
-      const coveredAmount = getSavingsCoverage("card-" + card.id + "-" + statementKey, total);
       let badge = '<span class="badge pending">Pendiente</span>';
       if (isPaid) {
         badge = '<span class="badge paid">Pagado</span>';
+      } else if (!isStatementClosed(statementKey)) {
+        badge = '<span class="badge">Aún no corta</span>';
       } else if (dueDate < today) {
         badge = '<span class="badge overdue">Vencido</span>';
       }
@@ -1194,48 +1420,56 @@
       const paidBeforeTracking = isStatementPaidBeforeTracking(card, statementKey);
       const canToggle = !paidBeforeTracking && (isPaid || isStatementClosed(statementKey));
 
+      let pendingHtml = "";
+      if (summary && summary.pendingBeforeAmount > 0.005 && !isPaid) {
+        pendingHtml = '<div class="row-subtitle tappable" data-action="edit-pending" data-id="' + escapeHtml(summary.key) + '" style="color:var(--warning)">' +
+          'Pendiente de antes: ' + formatMoney(summary.pendingBeforeAmount) + ' · cubierto ' + formatMoney(summary.pendingCoveredAmount) + ' (tocar)</div>';
+      }
+
       return '<div class="row">' +
         '<button class="check-button' + (isPaid ? ' checked' : '') + '" data-action="toggle-statement" data-id="' + card.id + '" data-statement="' + statementKey + '"' + (canToggle ? '' : ' disabled') + '>' + (isPaid ? '✓' : '') + '</button>' +
         '<div class="row-main">' +
           '<div class="row-title">' + title + '</div>' +
           '<div class="row-subtitle">Corte ' + escapeHtml(formatShortDate(statementKey)) + ' · pago ' + escapeHtml(formatShortDate(dueDate)) + ' ' + badge + '</div>' +
-          (coveredAmount > 0 ? '<div class="row-subtitle" style="color:var(--accent)">Con ahorro: ' + formatMoney(coveredAmount) + '</div>' : '') +
+          pendingHtml +
         '</div>' +
-        '<div class="row-amount">' + formatMoney(total) + '</div>' +
+        '<div class="row-amount">' + formatMoney(total) + '<div class="row-subtitle">sin intereses</div></div>' +
       '</div>';
     }
 
-    /** Builds the credit cards screen with statements and active MSI purchases. */
+    /** Builds the credit cards screen with statements, envelope balance and active MSI purchases. */
     function renderCards() {
       if (appData.cards.length === 0) {
         return '<div class="card"><div class="empty-state">Toca + para agregar tu primera tarjeta con su fecha de corte y de pago.</div></div>';
       }
 
       const today = getTodayDateString();
-      const paymentItems = buildPaymentItems();
+      const summaries = buildStatementSummaries(buildPaymentItems());
       let html = "";
 
       appData.cards.forEach(function (card) {
         const openStatementKey = getStatementKeyForDate(card, today);
         const lastClosedStatementKey = shiftStatementKey(card, openStatementKey, -1);
+        const expectedBalance = getExpectedEnvelopeBalance(card, summaries);
 
         html += '<div class="card">' +
           '<div class="row tappable" data-action="edit-card" data-id="' + card.id + '" style="padding-top:0">' +
             '<div class="row-main"><div class="row-title" style="font-size:18px">💳 ' + escapeHtml(card.name) + '</div>' +
             '<div class="row-subtitle">Corte día ' + card.cutoffDay + ' · pago día ' + card.paymentDay + '</div></div>' +
             '<div class="row-subtitle">Editar ›</div>' +
-          '</div>';
+          '</div>' +
+          '<div class="row"><div class="row-main row-subtitle">Tu apartado debería tener hoy</div><div class="row-amount" style="color:var(--accent)">' + formatMoney(expectedBalance) + '</div></div>';
 
         for (let monthsBack = 6; monthsBack >= 2; monthsBack--) {
           const olderStatementKey = shiftStatementKey(card, openStatementKey, -monthsBack);
-          const olderTotal = getStatementTotal(paymentItems, card.id, olderStatementKey);
-          if (olderTotal > 0 && !isStatementPaid(card, olderStatementKey)) {
-            html += renderStatementRow(card, olderStatementKey, "Pago anterior", olderTotal);
+          const olderSummary = summaries["card-" + card.id + "-" + olderStatementKey];
+          if (olderSummary && olderSummary.totalAmount > 0 && !isStatementPaid(card, olderStatementKey)) {
+            html += renderStatementRow(card, olderStatementKey, "Pago anterior", olderSummary);
           }
         }
 
-        html += renderStatementRow(card, lastClosedStatementKey, "Último corte", getStatementTotal(paymentItems, card.id, lastClosedStatementKey));
-        html += renderStatementRow(card, openStatementKey, "Periodo actual", getStatementTotal(paymentItems, card.id, openStatementKey));
+        html += renderStatementRow(card, lastClosedStatementKey, "Último corte", summaries["card-" + card.id + "-" + lastClosedStatementKey]);
+        html += renderStatementRow(card, openStatementKey, "Periodo actual", summaries["card-" + card.id + "-" + openStatementKey]);
         html += '</div>';
       });
 
@@ -1463,6 +1697,7 @@
           '<div class="field" data-show-for="card installments"><label>Tarjeta</label><select name="cardId">' + buildCardOptions(expense ? expense.cardId : null) + '</select></div>' +
           '<div class="field" data-show-for="installments"><label>Meses</label><input name="months" type="number" inputmode="numeric" min="2" max="60" value="' + (expense && expense.months ? expense.months : "12") + '"></div>' +
         '</div>' +
+        '<label class="checkbox-field" data-show-for="card"><input name="spreadUntilDue" type="checkbox"' + (expense && expense.spreadUntilDue ? " checked" : "") + '> Repartir hasta la fecha de pago</label>' +
         '<p class="hint-text" id="expenseHint"></p>' +
         buildSheetButtons();
     }
@@ -1501,7 +1736,7 @@
           '<div class="field"><label>Se paga con</label><select name="paymentMethod">' + buildPaymentMethodOptions(["cash", "debit", "card"], fixedExpense ? fixedExpense.paymentMethod : "debit") + '</select></div>' +
         '</div>' +
         '<div class="field" data-show-for="card"><label>Tarjeta</label><select name="cardId">' + buildCardOptions(fixedExpense ? fixedExpense.cardId : null) + '</select></div>' +
-        '<p class="helper-text">Si se carga a tarjeta, se suma al pago de esa tarjeta y no se aparta por separado.</p>' +
+        '<p class="helper-text">Si se carga a tarjeta, su parte semanal se mueve al apartado de esa tarjeta.</p>' +
         '<label class="checkbox-field"><input name="isActive" type="checkbox"' + (isActive ? " checked" : "") + '> Activo</label>' +
         buildSheetButtons();
     }
@@ -1511,19 +1746,32 @@
       return buildSheetHeader(envelope ? "Editar apartado" : "Nuevo apartado") +
         '<div class="field"><label>Nombre</label><input name="name" type="text" required maxlength="40" placeholder="Comida, ahorro, salidas…" value="' + escapeHtml(envelope ? envelope.name : "") + '"></div>' +
         '<div class="field"><label>Cantidad por semana</label><input name="weeklyAmount" type="number" inputmode="decimal" step="0.01" min="0.01" required value="' + (envelope ? envelope.weeklyAmount : "") + '"></div>' +
-        '<p class="helper-text">No puede pasar de lo que te queda libre esta semana después de los pagos.</p>' +
+        '<div class="field"><label>Cubre gastos de la categoría</label><select name="category"><option value="">Ninguna (ahorro o meta)</option>' + buildOptions(expenseCategories, envelope ? envelope.category : "") + '</select></div>' +
+        '<p class="helper-text">Si eliges una categoría, lo que gastes en ella esa semana sale primero de este apartado y no se resta dos veces. No puede pasar de lo que te queda después de fijos y MSI.</p>' +
         buildSheetButtons();
     }
 
-    /** Builds the form to pay part of a card payment or fixed expense with savings. */
-    function buildCoverageForm(row) {
-      const coveredAmount = Number(appData.savingsCoverages[row.groupKey]) || 0;
-      return buildSheetHeader("Pagar con ahorro") +
-        '<p class="row-subtitle" style="margin-bottom:14px">' + escapeHtml(row.label) + ' · vence ' + escapeHtml(formatDate(row.dueDate)) + ' · total ' + formatMoney(row.totalAmount) + '</p>' +
-        '<div class="field"><label>Monto que pagas con tu ahorro</label><input name="coveredAmount" type="number" inputmode="decimal" step="0.01" min="0" max="' + row.totalAmount.toFixed(2) + '" required value="' + (coveredAmount > 0 ? coveredAmount : "") + '"></div>' +
-        '<p class="helper-text">Esta parte ya no se aparta de tu sueldo. Lo que falte se reparte en las semanas que quedan.</p>' +
+    /** Builds the form to record how much of the amount pending from before the app is already covered. */
+    function buildPendingForm(summary) {
+      const coveredAmount = Number(appData.savingsCoverages[sheetEditingId]) || 0;
+      return buildSheetHeader("Pendiente de antes") +
+        '<p class="row-subtitle" style="margin-bottom:14px">💳 ' + escapeHtml(summary.card.name) + ' · pago del ' + escapeHtml(formatDate(summary.dueDate)) + ' · pendiente ' + formatMoney(summary.pendingBeforeAmount) + '</p>' +
+        '<p class="helper-text" style="margin-top:0">Es lo que ya debía estar en tu apartado cuando empezaste a usar la app: compras anteriores, saldo inicial y la parte de fijos y MSI de semanas anteriores.</p>' +
+        '<div class="field"><label>¿Cuánto ya tienes cubierto? (apartado o con tu ahorro)</label><input name="coveredAmount" type="number" inputmode="decimal" step="0.01" min="0" required value="' + (coveredAmount > 0 ? coveredAmount : "") + '"></div>' +
+        '<p class="helper-text">Lo que no cubras se reparte en las semanas que faltan para el pago.</p>' +
         '<button type="submit" class="primary-button">Guardar</button>' +
-        (coveredAmount > 0 ? '<button type="button" class="danger-button" data-action="delete-record">Quitar ahorro</button>' : '');
+        (coveredAmount > 0 ? '<button type="button" class="danger-button" data-action="delete-record">Quitar</button>' : '');
+    }
+
+    /** Builds the form to record savings used to complete a week. */
+    function buildWeekSavingsForm() {
+      const usedAmount = Number(appData.savingsCoverages[sheetEditingId]) || 0;
+      return buildSheetHeader("Ahorro usado") +
+        '<p class="row-subtitle" style="margin-bottom:14px">Semana del ' + escapeHtml(formatWeekDayDate(selectedWeekStart)) + '</p>' +
+        '<div class="field"><label>¿Cuánto sacas de tu ahorro esta semana?</label><input name="coveredAmount" type="number" inputmode="decimal" step="0.01" min="0" required value="' + (usedAmount > 0 ? usedAmount : "") + '"></div>' +
+        '<p class="helper-text">Se suma a lo libre de esta semana.</p>' +
+        '<button type="submit" class="primary-button">Guardar</button>' +
+        (usedAmount > 0 ? '<button type="button" class="danger-button" data-action="delete-record">Quitar</button>' : '');
     }
 
     /** Builds the form to edit the weekly salary and payday. */
@@ -1553,15 +1801,18 @@
         form.innerHTML = buildFixedExpenseForm(findRecord(appData.fixedExpenses, recordId));
       } else if (type === "envelope") {
         form.innerHTML = buildEnvelopeForm(findRecord(appData.envelopes, recordId));
-      } else if (type === "coverage") {
-        const row = getWeekPlan(selectedWeekStart).rows.find(function (planRow) {
-          return planRow.groupKey === recordId;
-        });
-        if (!row) {
+      } else if (type === "pending") {
+        const summary = buildStatementSummaries(buildPaymentItems())[recordId];
+        if (!summary) {
           return;
         }
-        sheetCoverageTotal = row.totalAmount;
-        form.innerHTML = buildCoverageForm(row);
+        sheetEditingId = "pending-" + recordId;
+        sheetCoverageTotal = summary.pendingBeforeAmount;
+        form.innerHTML = buildPendingForm(summary);
+      } else if (type === "weekSavings") {
+        sheetEditingId = "week-" + selectedWeekStart;
+        sheetCoverageTotal = Infinity;
+        form.innerHTML = buildWeekSavingsForm();
       } else {
         form.innerHTML = buildSettingsForm();
       }
@@ -1655,6 +1906,7 @@
         paymentMethod: paymentMethod,
         cardId: cardId,
         months: months,
+        spreadUntilDue: paymentMethod === "card" && formData.get("spreadUntilDue") === "on",
         fixedExpenseId: existingExpense ? existingExpense.fixedExpenseId : null,
         occurrenceDate: existingExpense ? existingExpense.occurrenceDate : null
       });
@@ -1728,7 +1980,7 @@
       return true;
     }
 
-    /** Saves the envelope form, checking it fits in what is free this week. Returns false when it does not fit. */
+    /** Saves the envelope form, checking it fits in what is left after fixed expenses and MSI. Returns false when it does not fit. */
     function saveEnvelope(formData, recordId) {
       if (!(appData.settings.weeklySalary > 0)) {
         alert("Primero configura tu sueldo semanal.");
@@ -1739,22 +1991,23 @@
       const existingEnvelope = findRecord(appData.envelopes, sheetEditingId);
       const currentPlan = getWeekPlan(getWeekStart(getTodayDateString()));
       const otherEnvelopesTotal = currentPlan.envelopeTotal - (existingEnvelope ? Number(existingEnvelope.weeklyAmount) : 0);
-      const availableAmount = currentPlan.salary - currentPlan.paymentTotal - otherEnvelopesTotal;
+      const availableAmount = currentPlan.salary - currentPlan.scheduledTotal - otherEnvelopesTotal;
 
       if (weeklyAmount > availableAmount + 0.005) {
-        alert("Solo tienes " + formatMoney(Math.max(availableAmount, 0)) + " libres esta semana.");
+        alert("Solo tienes " + formatMoney(Math.max(availableAmount, 0)) + " después de fijos y MSI esta semana.");
         return false;
       }
 
       upsertRecord(appData.envelopes, {
         id: recordId,
         name: formData.get("name").trim(),
-        weeklyAmount: weeklyAmount
+        weeklyAmount: weeklyAmount,
+        category: formData.get("category") || ""
       });
       return true;
     }
 
-    /** Saves the part of a payment covered with savings. Returns false when the amount is above the total. */
+    /** Saves a covered amount (pending from before or savings used in a week). Returns false when the amount is above the allowed total. */
     function saveCoverage(formData) {
       const coveredAmount = Number(formData.get("coveredAmount")) || 0;
       if (coveredAmount > sheetCoverageTotal + 0.005) {
@@ -1792,7 +2045,7 @@
         wasSaved = saveFixedExpense(formData, recordId);
       } else if (sheetType === "envelope") {
         wasSaved = saveEnvelope(formData, recordId);
-      } else if (sheetType === "coverage") {
+      } else if (sheetType === "pending" || sheetType === "weekSavings") {
         wasSaved = saveCoverage(formData);
       } else {
         wasSaved = saveSettings(formData);
@@ -1834,7 +2087,7 @@
         appData.fixedExpenses = appData.fixedExpenses.filter(keepOthers);
       } else if (sheetType === "envelope") {
         appData.envelopes = appData.envelopes.filter(keepOthers);
-      } else if (sheetType === "coverage") {
+      } else if (sheetType === "pending" || sheetType === "weekSavings") {
         delete appData.savingsCoverages[sheetEditingId];
       }
 
@@ -2002,8 +2255,13 @@
         openSheet("fixed", recordId);
       } else if (action === "edit-envelope") {
         openSheet("envelope", recordId);
-      } else if (action === "edit-coverage") {
-        openSheet("coverage", recordId);
+      } else if (action === "edit-pending") {
+        openSheet("pending", recordId);
+      } else if (action === "edit-week-savings") {
+        openSheet("weekSavings");
+      } else if (action === "toggle-week-group") {
+        expandedWeekGroups[recordId] = !expandedWeekGroups[recordId];
+        render();
       } else if (action === "filter-expenses") {
         selectedExpenseFilter = recordId;
         render();
